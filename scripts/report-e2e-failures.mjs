@@ -28,19 +28,32 @@ const errors = new Map();
 for (let i = 0; i < lines.length; i++) {
     const header = /^\s*\d+\)\s+(.*\S)\s*$/.exec(lines[i]);
     if (!header) continue;
-    for (let j = i + 1; j < Math.min(i + 12, lines.length); j++) {
+    // A bare `expect(received).toBe(expected)` names no values: the actual ones
+    // sit on later Expected:/Received: lines. Reporting only the first Error
+    // line produced a summary row that could not say what differed.
+    let message = '';
+    const values = [];
+    for (let j = i + 1; j < Math.min(i + 16, lines.length); j++) {
         const detail =
             /^\s*(Error|AssertionError|TimeoutError)\b[:\s](.*)$/.exec(
                 lines[j],
             );
-        if (detail) {
-            errors.set(
-                header[1],
-                `${detail[1]}: ${detail[2].trim()}`.slice(0, 300),
+        if (detail && !message) {
+            message = `${detail[1]}: ${detail[2].trim()}`;
+        }
+        const value =
+            /^\s*(Expected|Received|Number of calls)\s*:\s*(.*\S)\s*$/.exec(
+                lines[j],
             );
-            break;
+        if (value && values.length < 4) {
+            values.push(`${value[1]}: ${value[2]}`);
         }
     }
+    if (!message && values.length === 0) continue;
+    errors.set(
+        header[1],
+        [message, ...values].filter(Boolean).join(' · ').slice(0, 400),
+    );
 }
 
 const heading = `### E2E failures — ${label ?? 'unknown shard'}`;

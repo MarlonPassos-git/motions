@@ -107,6 +107,79 @@ async function isFoldableAt(line: number): Promise<boolean> {
     )) as boolean;
 }
 
+// viaCommand/foldedAfterCommand showed folding fails through Obsidian's own
+// command too, so delivery is not the cause. Three candidates remain and this
+// separates them: a degenerate provider range, a fold that is applied but not
+// detected, and a viewport too small to parse the section (macOS reports
+// 1024x676 against 2538x1380 locally).
+async function foldDiagnostics(line: number): Promise<unknown> {
+    return browser.executeObsidian(
+        ({ app, obsidian, require: req }, targetLine: number) => {
+            const view = app.workspace.getActiveViewOfType(
+                obsidian.MarkdownView,
+            );
+            if (!view) return { error: 'no MarkdownView' };
+            const lang = req('@codemirror/language') as {
+                foldable: (
+                    state: unknown,
+                    lineStart: number,
+                    lineEnd: number,
+                ) => { from: number; to: number } | null;
+                foldedRanges: (state: unknown) => {
+                    iter: (from?: number) => {
+                        value: unknown;
+                        from: number;
+                        to: number;
+                        next: () => void;
+                    };
+                };
+            };
+            const cm6View = (view.editor as unknown as Record<string, unknown>)
+                .cm as
+                | {
+                      state: {
+                          doc: {
+                              length: number;
+                              lines: number;
+                              line: (n: number) => { from: number; to: number };
+                          };
+                      };
+                      viewport: { from: number; to: number };
+                  }
+                | undefined;
+            if (!cm6View) return { error: 'no CM6 view' };
+            const docLine = cm6View.state.doc.line(targetLine + 1);
+            const range = lang.foldable(
+                cm6View.state,
+                docLine.from,
+                docLine.to,
+            );
+            const folded: Array<{ from: number; to: number }> = [];
+            const cursor = lang.foldedRanges(cm6View.state).iter(0);
+            while (cursor.value !== null && folded.length < 10) {
+                folded.push({ from: cursor.from, to: cursor.to });
+                cursor.next();
+            }
+            return {
+                line: docLine,
+                range,
+                degenerate: range ? range.to <= range.from : null,
+                foldedRanges: folded,
+                placeholders: document.querySelectorAll('.cm-foldPlaceholder')
+                    .length,
+                viewport: cm6View.viewport,
+                docLength: cm6View.state.doc.length,
+                docLines: cm6View.state.doc.lines,
+                viewportCoversLine:
+                    cm6View.viewport.from <= docLine.from &&
+                    cm6View.viewport.to >= docLine.to,
+                window: `${window.innerWidth}x${window.innerHeight}`,
+            };
+        },
+        line,
+    );
+}
+
 // zc can only fold a range the provider has already computed. Waiting for
 // the fold afterwards cannot help: if zc ran before the provider was ready
 // it folded nothing and no amount of waiting produces the effect. Wait for
@@ -171,6 +244,12 @@ async function expectFoldedAt(line: number, folded: boolean): Promise<void> {
         } catch (error) {
             foldedAfterCommand = `threw: ${String(error)}`;
         }
+        let details: unknown = 'not attempted';
+        try {
+            details = await foldDiagnostics(line);
+        } catch (error) {
+            details = `threw: ${String(error)}`;
+        }
         throw new Error(
             `fold state wrong at line ${line}: ${JSON.stringify({
                 expected: folded,
@@ -179,6 +258,7 @@ async function expectFoldedAt(line: number, folded: boolean): Promise<void> {
                 mode,
                 viaCommand,
                 foldedAfterCommand,
+                details,
             })}`,
         );
     }
