@@ -15,6 +15,7 @@ export default defineConfig(
         'esbuild.config.mjs',
         'version-bump.mjs',
         'scripts/report-latency.mjs',
+        'scripts/report-e2e-failures.mjs',
         'versions.json',
         'main.js',
         'package.json',

@@ -28,7 +28,10 @@ jobs:
                   else
                     num_shards=$MAX_SHARDS
                   fi
-                  # Distribute specs round-robin into shards as a JSON array of arrays
+                  # Distribute specs round-robin into shards. Each entry carries a
+                  # stable index alongside its spec list: the list is recomputed
+                  # whenever the spec count changes, so naming jobs after it made
+                  # one recurring failure look like a new flake every commit.
                   shards=$(echo "$specs" | awk -v n="$num_shards" '
                     BEGIN { for (i=0; i<n; i++) a[i]="" }
                     { idx = (NR-1) % n; a[idx] = a[idx] (a[idx]=="" ? "" : ",") $0 }
@@ -36,7 +39,7 @@ jobs:
                       printf "["
                       for (i=0; i<n; i++) {
                         if (i>0) printf ","
-                        printf "\"%s\"", a[i]
+                        printf "{\"index\":%d,\"specs\":\"%s\"}", i+1, a[i]
                       }
                       printf "]"
                     }
@@ -45,6 +48,7 @@ jobs:
 
     e2e:
         needs: discover
+        name: e2e (shard ${{ matrix.shard.index }})
         runs-on: ubuntu-latest
         container:
             image: ghcr.io/${{ github.repository }}/e2e-runner:latest
@@ -89,10 +93,19 @@ jobs:
                   key: obsidian-cache-${{ runner.os }}-${{ hashFiles('manifest.json') }}
 
             - name: Run E2E tests
+              shell: bash
               run: |
-                  SHARD='${{ matrix.shard }}'
+                  SHARD='${{ matrix.shard.specs }}'
                   SPEC_ARGS=$(echo "$SHARD" | tr ',' '\n' | while read -r spec; do printf ' --spec %s' "$spec"; done)
-                  npx wdio run ./wdio.conf.mts $SPEC_ARGS
+                  set +e
+                  npx wdio run ./wdio.conf.mts $SPEC_ARGS 2>&1 | tee e2e.log
+                  rc=${PIPESTATUS[0]}
+                  set -e
+                  if [ "$rc" -ne 0 ]; then
+                    node scripts/report-e2e-failures.mjs e2e.log \
+                      "ubuntu shard ${{ matrix.shard.index }}" >> "$GITHUB_STEP_SUMMARY"
+                  fi
+                  exit "$rc"
 
     e2e-latency:
         runs-on: ubuntu-latest
@@ -156,6 +169,7 @@ jobs:
 
     e2e-cross-platform:
         needs: discover
+        name: e2e (${{ matrix.os }}, shard ${{ matrix.shard.index }})
         strategy:
             fail-fast: false
             matrix:
@@ -205,8 +219,9 @@ jobs:
             - name: Run E2E tests
               shell: bash
               run: |
-                  SHARD='${{ matrix.shard }}'
+                  SHARD='${{ matrix.shard.specs }}'
                   SPEC_ARGS=$(echo "$SHARD" | tr ',' '\n' | while read -r spec; do printf ' --spec %s' "$spec"; done)
+                  rc=0
                   for attempt in 1 2 3; do
                     set +e
                     output=$(npx wdio run ./wdio.conf.mts $SPEC_ARGS 2>&1)
@@ -219,5 +234,13 @@ jobs:
                       sleep 5
                       continue
                     fi
-                    exit $rc
+                    break
                   done
+                  # Exhausting all three EPERM retries used to fall out of the loop
+                  # without exiting, reporting the shard green on three failed runs.
+                  if [ "$rc" -ne 0 ]; then
+                    printf '%s' "$output" > e2e.log
+                    node scripts/report-e2e-failures.mjs e2e.log \
+                      "${{ matrix.os }} shard ${{ matrix.shard.index }}" >> "$GITHUB_STEP_SUMMARY"
+                    exit "$rc"
+                  fi
