@@ -142,12 +142,43 @@ async function expectFoldedAt(line: number, folded: boolean): Promise<void> {
         // rejected or simply had no effect.
         const foldable = await isFoldableAt(line);
         const mode = await getVimMode();
+        // stillFoldable/mode said the key was not rejected and had no effect,
+        // which does not separate "the fold subsystem is broken" from "the
+        // keypress never arrived". Folding the same line through Obsidian's own
+        // command answers that: if this works, only key delivery is at fault.
+        // Guarded because it runs while the real failure is being reported.
+        let viaCommand: unknown = 'not attempted';
+        try {
+            viaCommand = await browser.executeObsidian(
+                ({ app, obsidian }, target: number) => {
+                    const view = app.workspace.getActiveViewOfType(
+                        obsidian.MarkdownView,
+                    );
+                    if (!view) return 'no MarkdownView';
+                    view.editor.setCursor({ line: target, ch: 0 });
+                    return app.commands.executeCommandById(
+                        'editor:toggle-fold',
+                    );
+                },
+                line,
+            );
+        } catch (error) {
+            viaCommand = `threw: ${String(error)}`;
+        }
+        let foldedAfterCommand: unknown = 'not attempted';
+        try {
+            foldedAfterCommand = await isFoldedAt(line);
+        } catch (error) {
+            foldedAfterCommand = `threw: ${String(error)}`;
+        }
         throw new Error(
             `fold state wrong at line ${line}: ${JSON.stringify({
                 expected: folded,
                 actual,
                 stillFoldable: foldable,
                 mode,
+                viaCommand,
+                foldedAfterCommand,
             })}`,
         );
     }

@@ -1,9 +1,12 @@
 import { browser, expect } from '@wdio/globals';
 import { obsidianPage } from 'wdio-obsidian-service';
-import { getCursorLine, vimKeys } from '../helpers';
+import { getCursorLine, vimHandleKeys, vimKeys } from '../helpers';
 
 describe('Structural navigation (Phase 1.3-1.4)', function () {
-    async function expectCursorLine(line: number): Promise<void> {
+    async function expectCursorLine(
+        line: number,
+        probeKeys?: string[],
+    ): Promise<void> {
         let last = -1;
         try {
             await browser.waitUntil(
@@ -14,8 +17,26 @@ describe('Structural navigation (Phase 1.3-1.4)', function () {
                 { timeout: 3000, interval: 50 },
             );
         } catch {
+            // "last observed 0" means the cursor never moved at all, which does
+            // not say whether the motion is broken or the keys never reached
+            // vim. Replaying the same keys through Vim.handleKey bypasses DOM
+            // delivery: if that moves the cursor, only delivery is at fault.
+            // Guarded so a failing probe cannot mask the real failure.
+            let viaHandleKey: unknown = 'not attempted';
+            if (probeKeys) {
+                try {
+                    await vimHandleKeys(probeKeys);
+                    viaHandleKey = await getCursorLine();
+                } catch (error) {
+                    viaHandleKey = `threw: ${String(error)}`;
+                }
+            }
             throw new Error(
-                `cursor never reached line ${line}; last observed ${last}`,
+                `cursor never reached line ${line}: ${JSON.stringify({
+                    lastObserved: last,
+                    probeKeys,
+                    viaHandleKey,
+                })}`,
             );
         }
         expect(await getCursorLine()).toBe(line);
@@ -201,7 +222,7 @@ describe('Structural navigation (Phase 1.3-1.4)', function () {
             });
             await browser.pause(300);
             await vimKeys(']', '3');
-            await expectCursorLine(4);
+            await expectCursorLine(4, [']', '3']);
         });
 
         it(']4 should jump to next H4', async function () {

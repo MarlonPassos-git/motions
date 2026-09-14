@@ -110,14 +110,41 @@ async function pollPaintedHeight(): Promise<number> {
         if (v > 0) return v;
         await browser.pause(90);
     }
-    const diagnosis = await browser.executeObsidian(() => {
+    const diagnosis = await browser.executeObsidian(({ app }) => {
         const canvases = Array.from(
             document.querySelectorAll('canvas'),
         ) as HTMLCanvasElement[];
+        // A correctly sized but unpainted canvas is what macOS reports, and the
+        // size alone cannot distinguish a controller that never runs from one
+        // that runs and draws nothing. Reduced motion is the specific suspect:
+        // the controller honours it by snapping, and CI hosts often force it.
+        const settings = (app as unknown as Record<string, never>)?.plugins
+            ? (
+                  app as unknown as {
+                      plugins: {
+                          plugins: Record<string, { settings?: unknown }>;
+                      };
+                  }
+              ).plugins.plugins['vim-motions']?.settings
+            : undefined;
+        const picked = settings as
+            | {
+                  animatedCursor?: boolean;
+                  smoothCursor?: boolean;
+                  smearTrail?: boolean;
+              }
+            | undefined;
         return {
             canvasCount: canvases.length,
             sizes: canvases.map((c) => `${c.width}x${c.height}`),
             styleWidths: canvases.map((c) => c.style.width),
+            reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)')
+                .matches,
+            hidden: document.hidden,
+            devicePixelRatio: window.devicePixelRatio,
+            animatedCursor: picked?.animatedCursor,
+            smoothCursor: picked?.smoothCursor,
+            smearTrail: picked?.smearTrail,
         };
     });
     throw new Error(
