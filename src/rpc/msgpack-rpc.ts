@@ -10,7 +10,15 @@ type WritableStreamHandle = {
 type PendingRequest = {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
 };
+
+// A request Neovim never answers used to leave its promise pending forever.
+// Every caller awaits these, so the wait propagated: under WebDriver the
+// renderer stopped responding, the session was destroyed, and the resulting
+// failure surfaced in an unrelated afterEach hook rather than at the call.
+// Well above the measured p99 of ~50ms, so only a genuine hang trips it.
+const REQUEST_TIMEOUT_MS = 30000;
 
 type NotificationListener = (args: unknown[]) => void;
 
@@ -332,12 +340,22 @@ export class MsgpackRpcClient {
             return Promise.reject(new Error('RPC client closed'));
         const requestId = this.nextRequestId++;
         return new Promise((resolve, reject) => {
-            this.pending.set(requestId, { resolve, reject });
+            const timer = setTimeout(() => {
+                if (!this.pending.delete(requestId)) return;
+                reject(
+                    new Error(
+                        `Neovim RPC request timed out after ${REQUEST_TIMEOUT_MS}ms: ${method}`,
+                    ),
+                );
+            }, REQUEST_TIMEOUT_MS);
+            (timer as { unref?: () => void }).unref?.();
+            this.pending.set(requestId, { resolve, reject, timer });
             try {
                 this.input.write(
                     new Uint8Array(encodeValue([0, requestId, method, args])),
                 );
             } catch (error) {
+                clearTimeout(timer);
                 this.pending.delete(requestId);
                 reject(
                     error instanceof Error ? error : new Error(String(error)),
@@ -365,7 +383,10 @@ export class MsgpackRpcClient {
         if (this.disposed) return;
         this.disposed = true;
         this.output.removeListener('data', this.onData);
-        for (const request of this.pending.values()) request.reject(reason);
+        for (const request of this.pending.values()) {
+            clearTimeout(request.timer);
+            request.reject(reason);
+        }
         this.pending.clear();
         this.notificationListeners.clear();
         this.buffer = new Uint8Array();
@@ -387,6 +408,7 @@ export class MsgpackRpcClient {
         if (typeof requestId !== 'number') return;
         const request = this.pending.get(requestId);
         if (!request) return;
+        clearTimeout(request.timer);
         this.pending.delete(requestId);
         const error = values[2];
         if (error !== null && error !== undefined) {
