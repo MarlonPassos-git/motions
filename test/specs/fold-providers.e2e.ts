@@ -419,6 +419,27 @@ describe('Fold providers and placeholders (Phase 3)', function () {
                         // the specific suspect for the canvas entries: a
                         // virtualised macOS runner has no GPU, and a paint that
                         // never happens there may never affect a real user.
+                        // placeholders is 0 on the failing macOS runs and 1
+                        // everywhere else, while the fold effect still sticks:
+                        // the fold reaches state but never renders. These
+                        // record whether the editor view is laid out at all.
+                        contentHeight: (
+                            document.querySelector(
+                                '.cm-content',
+                            ) as HTMLElement | null
+                        )?.getBoundingClientRect().height,
+                        editorHeight: (
+                            document.querySelector(
+                                '.cm-editor',
+                            ) as HTMLElement | null
+                        )?.getBoundingClientRect().height,
+                        scrollerHeight: (
+                            document.querySelector(
+                                '.cm-scroller',
+                            ) as HTMLElement | null
+                        )?.getBoundingClientRect().height,
+                        lineCount: document.querySelectorAll('.cm-line').length,
+                        docVisible: document.visibilityState,
                         cores: navigator.hardwareConcurrency,
                         memoryGb: (
                             navigator as unknown as { deviceMemory?: number }

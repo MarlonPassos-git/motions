@@ -93,6 +93,9 @@ jobs:
                       pass=$((pass + 1))
                       echo "iteration $i: pass"
                     else
+                      # The first version captured the output and never printed
+                      # it, so a failing iteration left no evidence in the log.
+                      printf '%s\n' "$out"
                       fail=$((fail + 1))
                       echo "iteration $i: FAIL"
                       printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' \
