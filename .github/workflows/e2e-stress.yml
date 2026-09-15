@@ -1,0 +1,136 @@
+name: E2E Stress
+
+# A normal run samples a spec once, so establishing a failure rate or finding
+# the first test that breaks a later one costs one round trip per sample. This
+# runs a single spec repeatedly on one runner and reports the tally, turning
+# twenty round trips into one.
+
+on:
+    workflow_dispatch:
+        inputs:
+            spec:
+                description: 'Spec file to stress'
+                required: true
+                default: 'test/specs/fold-providers.e2e.ts'
+            iterations:
+                description: 'How many times to run it'
+                required: true
+                default: '15'
+            os:
+                description: 'Runner'
+                required: true
+                default: 'macos-latest'
+                type: choice
+                options:
+                    - macos-latest
+                    - windows-latest
+                    - ubuntu-latest
+
+jobs:
+    stress:
+        name: stress ${{ inputs.spec }} x${{ inputs.iterations }} on ${{ inputs.os }}
+        runs-on: ${{ inputs.os }}
+        timeout-minutes: 350
+        env:
+            CSC_IDENTITY_AUTO_DISCOVERY: false
+
+        steps:
+            - uses: actions/checkout@v6
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: npm
+
+            - name: Install dependencies
+              run: npm install --include=dev
+
+            - name: Install pinned Neovim
+              if: inputs.os != 'windows-latest'
+              run: bash scripts/install-neovim.sh
+
+            - name: Install pinned Neovim on Windows
+              if: inputs.os == 'windows-latest'
+              run: pwsh scripts/install-neovim.ps1
+
+            - name: Fetch test plugins
+              run: bash scripts/fetch-test-plugins.sh
+
+            - name: Build
+              run: npm run build:ci-test
+
+            - name: Start virtual display
+              if: inputs.os == 'ubuntu-latest'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y xvfb herbstluftwm
+                  Xvfb :99 -screen 0 1280x1024x24 &
+                  sleep 3
+                  DISPLAY=:99 herbstluftwm &
+                  sleep 1
+                  echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+            - name: Cache Obsidian
+              uses: actions/cache@v5
+              with:
+                  path: .obsidian-cache
+                  key: obsidian-cache-${{ runner.os }}-${{ hashFiles('manifest.json') }}
+                  restore-keys: obsidian-cache-${{ runner.os }}-
+
+            - name: Stress
+              shell: bash
+              run: |
+                  pass=0
+                  fail=0
+                  : > failing-tests.txt
+                  for i in $(seq 1 ${{ inputs.iterations }}); do
+                    set +e
+                    out=$(npx wdio run ./wdio.conf.mts --spec '${{ inputs.spec }}' 2>&1)
+                    rc=$?
+                    set -e
+                    if [ "$rc" -eq 0 ]; then
+                      pass=$((pass + 1))
+                      echo "iteration $i: pass"
+                    else
+                      fail=$((fail + 1))
+                      echo "iteration $i: FAIL"
+                      printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' \
+                        | grep -aE '^\s*✖' | sed "s/^/  iter $i /" >> failing-tests.txt
+                    fi
+                    # The per-test traces are the point of the run, so keep them
+                    # even when the iteration passed.
+                    printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' \
+                      | grep -aoE '(FOLDTRACE|FOLDENV|CURSORFORCE) \{.*\}' \
+                      | sed "s/^/iter $i /" >> traces.txt || true
+                  done
+
+                  {
+                    echo "### Stress: \`${{ inputs.spec }}\` x${{ inputs.iterations }} on ${{ inputs.os }}"
+                    echo
+                    echo "| result | count |"
+                    echo "| --- | --- |"
+                    echo "| pass | $pass |"
+                    echo "| fail | $fail |"
+                    echo
+                    if [ -s failing-tests.txt ]; then
+                      echo '<details><summary>Failing tests</summary>'
+                      echo
+                      echo '```'
+                      sort failing-tests.txt | uniq -c | sort -rn
+                      echo '```'
+                      echo '</details>'
+                    fi
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "pass=$pass fail=$fail"
+
+            - name: Upload traces
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: stress-traces-${{ inputs.os }}
+                  path: |
+                      traces.txt
+                      failing-tests.txt
+                  if-no-files-found: ignore

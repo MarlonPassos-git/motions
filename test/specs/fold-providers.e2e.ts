@@ -459,6 +459,35 @@ describe('Fold providers and placeholders (Phase 3)', function () {
         }
     });
 
+    afterEach(async function () {
+        const title = this.currentTest?.title ?? '?';
+        try {
+            await setupEditor(CALLOUT_DOC, { line: 2, ch: 0 });
+            await browser.pause(PAUSE.EDITOR_SETTLE);
+            const foldable = await isFoldableAt(2);
+            const env = await foldDiagnostics(2);
+            const e = env as Record<string, unknown>;
+            console.log(
+                'FOLDTRACE ' +
+                    JSON.stringify({
+                        after: title.slice(0, 44),
+                        foldable,
+                        range: e.range,
+                        foldedRanges: e.foldedRanges,
+                        placeholders: e.placeholders,
+                    }),
+            );
+        } catch (error) {
+            console.log(
+                'FOLDTRACE ' +
+                    JSON.stringify({
+                        after: title.slice(0, 44),
+                        threw: String(error),
+                    }),
+            );
+        }
+    });
+
     describe('Frontmatter fold provider', function () {
         it('frontmatter --- is foldable', async function () {
             await setupEditor(FRONTMATTER_DOC, { line: 0, ch: 0 });
