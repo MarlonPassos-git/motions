@@ -32,8 +32,8 @@ skip on that condition explicitly rather than silently vary.
 | Test                                                                       | Platform  | Observed                | Status                                                                                                                                                    |
 | -------------------------------------------------------------------------- | --------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `g- does not crash at root`                                                | all three | 4 runs                  | **Resolved — product.** Stale `this.undoTree` captured at registration; `activateUndoTreeForFile()` swaps it per note. Fixed in `ff8442a`.                |
-| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Product.** Vim-mode toggle leaves fold providers unregistered. Evidence below.                                                                          |
-| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Product.** Same cause; fails in the same runs.                                                                                                          |
+| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Resolved — product.** Toggle discarded the enable, leaving fold providers unregistered. Fixed in `34168dd`. Evidence below.                             |
+| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Resolved — product.** Same cause, fixed in `34168dd`.                                                                                                   |
 | `cursor follows cursor movement`                                           | macOS     | 2 of last 3             | Unknown. Lives in `animated-cursor-scroll.e2e.ts`; issue #181 is "Animated Cursor breaks when scrolling", so a real product bug is the leading candidate. |
 | `]3 should jump to next H3`                                                | macOS     | 3/5                     | Unknown. Candidate: the same toggle race, since `beforeSuite` cycles vim before every spec.                                                               |
 | `the animated cursor picks up a shape change (#181)`                       | macOS     | 1                       | Unknown. Fails on its canvas-paint precondition, not on the scroll defect #181 describes.                                                                 |
@@ -104,8 +104,31 @@ Two fixes were attempted and **both proven insufficient**, so neither shipped:
    (`enable-vim-mode` reads the flag synchronously, so with a disable pending
    the enable was never queued at all), but not this.
 
-The fix is to make `disableVim` await its complete teardown. It is proven when
-the probe above reports `afterEachCycle: "TTTTTTTT"`.
+### Resolution (`34168dd`)
+
+Both `disableVim` and `enableVim` cleared `toggleInProgress` from a 500 ms
+timer armed in `finally`, so the returned promise resolved while the flag was
+still set. The opposite toggle, arriving inside that window, hit its own guard
+and was discarded with nothing to retry it.
+
+Three changes were needed, and each was individually insufficient:
+
+1. **Await the cooldown** before clearing the flag, so the promise reflects
+   completion. The chain alone still resolved into the window.
+2. **Serialise toggles** through a promise chain, so the next starts after the
+   previous finishes.
+3. **Defer the `settings.vimEnabled` check** out of the command callbacks.
+   Reading it synchronously made `enable-vim-mode` skip queueing a toggle whose
+   predecessor had not yet updated the flag, so the guard was never reached.
+
+The probe now reports `afterEachCycle: "TTTTTTTT"` with `vimEnabled: true`.
+
+`vim-toggle.e2e.ts`'s `rapid toggle is debounced` asserted `vimEnabled` false
+after a rapid disable/enable — the dropped request, encoded as intent. It now
+asserts the state that was asked for. This is a deliberate behaviour change:
+a rapid double toggle applies both halves instead of swallowing the second. If
+the debounce was guarding against real thrash, the better design is coalescing
+(record the desired end state, apply once) rather than applying both.
 
 ### Why this may not be only about folding
 
@@ -114,4 +137,5 @@ that `animatedCursor`, `enableSnippets`, `snippetTriggerMode` and
 `enableUndoTree` all shipped broken for want of a runtime slot. Any
 extension-slot feature is exposed to the same teardown race, so this one cause
 may account for several macOS entries above. Test them against this lever
-before investigating them separately.
+before investigating them separately — `34168dd` may already have cleared
+some of them, which the next CI run will show.
