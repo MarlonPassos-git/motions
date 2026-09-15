@@ -47,6 +47,30 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows   | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                         |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows   | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                            |
 
+## Runner capability, measured
+
+|                    | Linux       | macOS    | Windows     |
+| ------------------ | ----------- | -------- | ----------- |
+| cores              | 4           | 3        | 4           |
+| device memory      | 8 GB        | 8 GB     | 8 GB        |
+| WebGL              | SwiftShader | **none** | SwiftShader |
+| `directFoldEffect` | stuck       | stuck    | stuck       |
+
+macOS is the only runner with no WebGL context, and the only one where the
+canvas entries fail. That is suggestive, but it is **not** a capability wall:
+`9fda566` added `canvasPaintSupported`, which skips a canvas spec when 2D
+paint and readback are unavailable, and across 36 macOS jobs in run
+`35008278154` it never fired. Both canvas tests ran and passed there.
+
+So the canvas entries are intermittent on macOS, not impossible on macOS, and
+"a runner artifact that cannot affect real users" is **not** established.
+
+Note the guard checks an offscreen 2D readback, which is weaker than what the
+feature needs (an onscreen composited canvas). It not firing rules out the
+strongest form of incapability, not every form.
+
+Fold works on all three runners, so no graphics explanation applies to it.
+
 ## Do the entries share a cause?
 
 Two structural factors were checked and neither discriminates:
