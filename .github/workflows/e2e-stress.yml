@@ -9,7 +9,7 @@ on:
     workflow_dispatch:
         inputs:
             spec:
-                description: 'Spec file to stress'
+                description: 'Spec file(s), comma-separated, run together as one shard'
                 required: true
                 default: 'test/specs/fold-providers.e2e.ts'
             iterations:
@@ -86,7 +86,12 @@ jobs:
                   : > failing-tests.txt
                   for i in $(seq 1 ${{ inputs.iterations }}); do
                     set +e
-                    out=$(npx wdio run ./wdio.conf.mts --spec '${{ inputs.spec }}' 2>&1)
+                    # Comma-separated so a whole shard can be reproduced: the
+                    # fold failure is ~7% for the spec alone and ~60% alongside
+                    # its shard mates, so companions are part of the condition.
+                    SPEC_ARGS=$(echo '${{ inputs.spec }}' | tr ',' '\n' \
+                      | while read -r sp; do [ -n "$sp" ] && printf ' --spec %s' "$sp"; done)
+                    out=$(npx wdio run ./wdio.conf.mts $SPEC_ARGS 2>&1)
                     rc=$?
                     set -e
                     if [ "$rc" -eq 0 ]; then
