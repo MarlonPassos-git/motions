@@ -47,6 +47,34 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows   | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                         |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows   | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                            |
 
+## Do the entries share a cause?
+
+Two structural factors were checked and neither discriminates:
+
+- **Position in the spec file.** Spread evenly (4/8, 8/8, 4/7, 11/16, 2/2,
+  11/29, 10/14, 5/14, 1/1, 2/12, 7/10, 24/29), so this is not per-spec setup
+  hitting the first tests.
+- **Synchronisation style.** `zc on callout folds it` has seven `browser.pause`
+  calls and four `waitUntil`s and fails; `which-key`, the operator-pending pair
+  and the jumplist entry have none of either and fail too.
+
+What does partition cleanly is the subsystem each one waits on, and it
+correlates with platform:
+
+| Cluster         | Entries                                        | Asserts on                                  | Platform         |
+| --------------- | ---------------------------------------------- | ------------------------------------------- | ---------------- |
+| Rendering/paint | fold pair, animated cursor pair                | CM6 decorations, canvas pixels              | all macOS        |
+| RPC lifecycle   | structural-nav pair, text-objects, bridge pair | cross-process parity; two are hook failures | Linux-dominant   |
+| UI lifecycle    | which-key, picker leak, pane focus             | transient overlay, modal, focus             | Windows-dominant |
+
+Every entry asserts on state an asynchronous subsystem must produce in
+reaction to an event, never on synchronous in-memory state. That is necessary
+but not sufficient — most passing e2e tests do the same.
+
+The clustering argues against a single root cause. Treat the three groups as
+three investigations, and force each at the conditions its own cluster runs
+under.
+
 ## Two runs of one commit share no failures
 
 `2b6bc75` was run twice with no code change between them:
