@@ -151,11 +151,18 @@ of them down together, not folding alone.
 
 That makes one mechanism a candidate for several entries above, including
 both animated-cursor entries, whose CI signature is a canvas that never
-paints. **Not yet confirmed by measurement**: a local probe misconfigured its
-own precondition (`setPluginSetting` stores the value but does not reload
-features — `setPluginSettingAndReload` does), so it produced `canvases: 0` at
-baseline and proved nothing. Re-run it with the reloading helper before
-treating this as established.
+paints. **Not yet confirmed by measurement.** Two probe attempts failed on their own
+preconditions rather than on the subject:
+
+1. `setPluginSetting` stores the value without reloading features, giving
+   `canvases: 0` at baseline. Use `setPluginSettingAndReload`.
+2. With that fixed, `canvases: 1` but `painted: false` _at baseline_, before
+   any toggling — the canvas is sampled once after 500 ms, while the real
+   assertion polls up to 5.4 s (`pollPaintedCursor`). A single sample is too
+   early to mean anything.
+
+A valid probe must reuse the spec's own polling helper rather than a
+point-in-time read. Until then this remains a source-level observation.
 
 ### Why this may not be only about folding
 
