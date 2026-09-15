@@ -32,8 +32,8 @@ skip on that condition explicitly rather than silently vary.
 | Test                                                                       | Platform  | Observed                | Status                                                                                                                                                                                             |
 | -------------------------------------------------------------------------- | --------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `g- does not crash at root`                                                | all three | 4 runs                  | **Resolved — product.** Stale `this.undoTree` captured at registration; `activateUndoTreeForFile()` swaps it per note. Fixed in `ff8442a`.                                                         |
-| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Resolved — product.** Toggle discarded the enable, leaving fold providers unregistered. Fixed in `34168dd`. Evidence below.                                                                      |
-| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Resolved — product.** Same cause, fixed in `34168dd`.                                                                                                                                            |
+| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Unresolved.** A real toggle defect was found and fixed (`34168dd`) but did **not** clear this: it still failed in 2 of 3 runs containing the fix. Evidence below.                                |
+| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Unresolved.** Fails with the above; `34168dd` did not clear it.                                                                                                                                  |
 | `cursor follows cursor movement`                                           | macOS     | 2 of last 3             | Unknown. Defined in `animated-cursor.e2e.ts`, which is **not** the scroll spec: an earlier note here tied it to #181 ("breaks when scrolling") on a misread filename. No established link to #181. |
 | `]3 should jump to next H3`                                                | macOS     | 3/5                     | Unknown. Candidate: the same toggle race, since `beforeSuite` cycles vim before every spec.                                                                                                        |
 | `the animated cursor picks up a shape change (#181)`                       | macOS     | 1                       | Unknown. Fails on its canvas-paint precondition, not on the scroll defect #181 describes.                                                                                                          |
@@ -116,7 +116,27 @@ Two fixes were attempted and **both proven insufficient**, so neither shipped:
    (`enable-vim-mode` reads the flag synchronously, so with a disable pending
    the enable was never queued at all), but not this.
 
-### Resolution (`34168dd`)
+### The toggle defect is real but is not this cause
+
+`34168dd` fixed a genuine, user-facing bug: a rapid disable/enable left Vim
+off and every extension-slot feature unregistered until Obsidian reloaded.
+Forced deterministically before the fix, `TTTTTTTT` after it.
+
+It did **not** fix the fold failures. `zc on callout folds it` and
+`editor:unfold-all` failed again in `953c8e6` and `4b688c6`, both of which
+contain the fix, at roughly the pre-fix rate.
+
+The error was an inference, not a measurement. The forced reproduction used a
+**0 ms** gap between disable and enable; at the **800 ms** gap `wdio.conf.mts`
+actually uses, the _unfixed_ code folded 6/6. Claiming CI was affected
+required assuming a slow macOS runner makes 800 ms behave like 0 ms, which
+was never measured and is now refuted.
+
+The fold cause is therefore still unknown, and this is the eleventh refuted
+hypothesis for it. Anything proposed next must be forced at the gap CI
+actually uses.
+
+### Toggle fix detail (`34168dd`)
 
 Both `disableVim` and `enableVim` cleared `toggleInProgress` from a 500 ms
 timer armed in `finally`, so the returned promise resolved while the flag was
