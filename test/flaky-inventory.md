@@ -29,21 +29,33 @@ skip on that condition explicitly rather than silently vary.
 
 ## Inventory
 
-| Test                                                                       | Platform  | Observed                | Status                                                                                                                                                    |
-| -------------------------------------------------------------------------- | --------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `g- does not crash at root`                                                | all three | 4 runs                  | **Resolved — product.** Stale `this.undoTree` captured at registration; `activateUndoTreeForFile()` swaps it per note. Fixed in `ff8442a`.                |
-| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Resolved — product.** Toggle discarded the enable, leaving fold providers unregistered. Fixed in `34168dd`. Evidence below.                             |
-| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Resolved — product.** Same cause, fixed in `34168dd`.                                                                                                   |
-| `cursor follows cursor movement`                                           | macOS     | 2 of last 3             | Unknown. Lives in `animated-cursor-scroll.e2e.ts`; issue #181 is "Animated Cursor breaks when scrolling", so a real product bug is the leading candidate. |
-| `]3 should jump to next H3`                                                | macOS     | 3/5                     | Unknown. Candidate: the same toggle race, since `beforeSuite` cycles vim before every spec.                                                               |
-| `the animated cursor picks up a shape change (#181)`                       | macOS     | 1                       | Unknown. Fails on its canvas-paint precondition, not on the scroll defect #181 describes.                                                                 |
-| `focuses the expected pane in all four directions`                         | macOS     | 1                       | Unknown.                                                                                                                                                  |
-| `"after each" hook — RPC key delegation`                                   | macOS     | 1                       | Unknown.                                                                                                                                                  |
-| `"after each" hook — RPC structural navigation`                            | Linux     | 2/5 in CI, ~1/3 locally | Unknown. A cascade, not a cause: the session dies in the preceding test.                                                                                  |
-| `matches counted operator-pending heading motion edits`                    | Linux     | 1                       | Unknown.                                                                                                                                                  |
-| `matches backward operator-pending heading motion edits`                   | Linux     | 2                       | Unknown. Primary failure in the run whose afterEach then cascades.                                                                                        |
-| `matches the fork for operators, visual selections, registers, and counts` | Windows   | 1                       | Unknown.                                                                                                                                                  |
-| `which-key shows after space press`                                        | Windows   | 1                       | Unknown. Polls 2000 ms for behaviour gated by `operatorshadowtimeout`'s 1000 ms deferral, so the margin is thin by construction.                          |
+| Test                                                                       | Platform  | Observed                | Status                                                                                                                                                                                             |
+| -------------------------------------------------------------------------- | --------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `g- does not crash at root`                                                | all three | 4 runs                  | **Resolved — product.** Stale `this.undoTree` captured at registration; `activateUndoTreeForFile()` swaps it per note. Fixed in `ff8442a`.                                                         |
+| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Resolved — product.** Toggle discarded the enable, leaving fold providers unregistered. Fixed in `34168dd`. Evidence below.                                                                      |
+| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Resolved — product.** Same cause, fixed in `34168dd`.                                                                                                                                            |
+| `cursor follows cursor movement`                                           | macOS     | 2 of last 3             | Unknown. Defined in `animated-cursor.e2e.ts`, which is **not** the scroll spec: an earlier note here tied it to #181 ("breaks when scrolling") on a misread filename. No established link to #181. |
+| `]3 should jump to next H3`                                                | macOS     | 3/5                     | Unknown. Candidate: the same toggle race, since `beforeSuite` cycles vim before every spec.                                                                                                        |
+| `the animated cursor picks up a shape change (#181)`                       | macOS     | 1                       | Unknown. Fails on its canvas-paint precondition, not on the scroll defect #181 describes.                                                                                                          |
+| `focuses the expected pane in all four directions`                         | macOS     | 1                       | Unknown.                                                                                                                                                                                           |
+| `"after each" hook — RPC key delegation`                                   | macOS     | 1                       | Unknown.                                                                                                                                                                                           |
+| `"after each" hook — RPC structural navigation`                            | Linux     | 2/5 in CI, ~1/3 locally | Unknown. A cascade, not a cause: the session dies in the preceding test.                                                                                                                           |
+| `matches counted operator-pending heading motion edits`                    | Linux     | 1                       | Unknown.                                                                                                                                                                                           |
+| `matches backward operator-pending heading motion edits`                   | Linux     | 2                       | Unknown. Primary failure in the run whose afterEach then cascades.                                                                                                                                 |
+| `matches the fork for operators, visual selections, registers, and counts` | Windows   | 1                       | Unknown.                                                                                                                                                                                           |
+| `which-key shows after space press`                                        | Windows   | 1                       | Unknown. Polls 2000 ms for behaviour gated by `operatorshadowtimeout`'s 1000 ms deferral, so the margin is thin by construction.                                                                   |
+
+## Shard numbers do not identify specs
+
+`e2e (macos-latest, shard 3)` reported `cursor follows cursor movement`, but
+that test is defined in `animated-cursor.e2e.ts`, which the same round-robin
+places in shard 1; shard 3 holds `animated-cursor-scroll.e2e.ts`, which does
+not define it. Recomputing the discover job's distribution locally therefore
+does **not** reliably reproduce the mapping a given run used.
+
+Read the failing test name from the job log or the step summary. Do not infer
+the spec from the shard index, and do not infer a root cause from the spec you
+think the shard contains — that is how the #181 attribution above was made.
 
 ## Fold providers lost by the vim-mode toggle
 
