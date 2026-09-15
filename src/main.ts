@@ -290,6 +290,8 @@ import {
 } from './rpc/neovim-connection';
 const MAX_PERSISTED_UNDO_TREES = 50;
 
+const TOGGLE_COOLDOWN_MS = 500;
+
 export default class VimMotionsPlugin extends Plugin {
     settings!: VimMotionsSettings;
     registration: VimRegistration | null = null;
@@ -372,6 +374,7 @@ export default class VimMotionsPlugin extends Plugin {
     private snippetRuntimeSlot: Extension[] = [];
     private slotExtensionCache = new Map<string, Extension>();
     private toggleInProgress = false;
+    private toggleChain: Promise<void> = Promise.resolve();
     private vimrcLoading = false;
     private vimrcMaps: VimrcLoadResult['maps'] = [];
     vimrcOverrides: Map<string, string> = new Map();
@@ -1188,7 +1191,7 @@ export default class VimMotionsPlugin extends Plugin {
                 if (key === 'vimMode') {
                     const builtinOn = isBuiltinVimEnabled(this.app);
                     if (builtinOn && this.settings.vimEnabled) {
-                        void this.disableVim();
+                        void this.enqueueVimToggle(() => this.disableVim());
                     }
                 }
             }),
@@ -1413,11 +1416,11 @@ export default class VimMotionsPlugin extends Plugin {
                     new Notice("Disable Obsidian's built-in Vim mode first.");
                     return;
                 }
-                if (this.settings.vimEnabled) {
-                    void this.disableVim();
-                } else {
-                    void this.enableVim();
-                }
+                void this.enqueueVimToggle(() =>
+                    this.settings.vimEnabled
+                        ? this.disableVim()
+                        : this.enableVim(),
+                );
             },
         });
         this.addCommand({
@@ -1428,9 +1431,7 @@ export default class VimMotionsPlugin extends Plugin {
                     new Notice("Disable Obsidian's built-in Vim mode first.");
                     return;
                 }
-                if (!this.settings.vimEnabled) {
-                    void this.enableVim();
-                }
+                void this.enqueueVimToggle(() => this.enableVim());
             },
         });
         this.addCommand({
@@ -1438,9 +1439,7 @@ export default class VimMotionsPlugin extends Plugin {
             name: 'Disable Vim mode',
             callback: () => {
                 if (isBuiltinVimEnabled(this.app)) return;
-                if (this.settings.vimEnabled) {
-                    void this.disableVim();
-                }
+                void this.enqueueVimToggle(() => this.disableVim());
             },
         });
 
@@ -3124,10 +3123,23 @@ export default class VimMotionsPlugin extends Plugin {
             await this.saveSettings();
             this.app.workspace.trigger('parse-style-settings');
         } finally {
-            window.setTimeout(() => {
-                this.toggleInProgress = false;
-            }, 500);
+            // The cooldown is awaited rather than left running past the
+            // returned promise. Resolving while toggleInProgress was still set
+            // meant the opposite toggle, arriving inside the window, hit its
+            // own guard and was dropped with nothing to retry it: a disable
+            // followed by an enable left Vim off and every extension-slot
+            // feature unregistered until Obsidian reloaded.
+            await new Promise<void>((resolve) => {
+                window.setTimeout(resolve, TOGGLE_COOLDOWN_MS);
+            });
+            this.toggleInProgress = false;
         }
+    }
+
+    private enqueueVimToggle(op: () => Promise<void>): Promise<void> {
+        const run = (): Promise<void> => op();
+        this.toggleChain = this.toggleChain.then(run, run);
+        return this.toggleChain;
     }
 
     private async enableVim(): Promise<void> {
@@ -3171,9 +3183,16 @@ export default class VimMotionsPlugin extends Plugin {
             await this.saveSettings();
             this.app.workspace.trigger('parse-style-settings');
         } finally {
-            window.setTimeout(() => {
-                this.toggleInProgress = false;
-            }, 500);
+            // The cooldown is awaited rather than left running past the
+            // returned promise. Resolving while toggleInProgress was still set
+            // meant the opposite toggle, arriving inside the window, hit its
+            // own guard and was dropped with nothing to retry it: a disable
+            // followed by an enable left Vim off and every extension-slot
+            // feature unregistered until Obsidian reloaded.
+            await new Promise<void>((resolve) => {
+                window.setTimeout(resolve, TOGGLE_COOLDOWN_MS);
+            });
+            this.toggleInProgress = false;
         }
     }
 
