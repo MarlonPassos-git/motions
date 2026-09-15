@@ -10,7 +10,7 @@ type WritableStreamHandle = {
 type PendingRequest = {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
-    timer: ReturnType<typeof setTimeout>;
+    timer: ReturnType<typeof window.setTimeout>;
 };
 
 // A request Neovim never answers used to leave its promise pending forever.
@@ -340,7 +340,7 @@ export class MsgpackRpcClient {
             return Promise.reject(new Error('RPC client closed'));
         const requestId = this.nextRequestId++;
         return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
+            const timer = window.setTimeout(() => {
                 if (!this.pending.delete(requestId)) return;
                 reject(
                     new Error(
@@ -348,14 +348,13 @@ export class MsgpackRpcClient {
                     ),
                 );
             }, REQUEST_TIMEOUT_MS);
-            (timer as { unref?: () => void }).unref?.();
             this.pending.set(requestId, { resolve, reject, timer });
             try {
                 this.input.write(
                     new Uint8Array(encodeValue([0, requestId, method, args])),
                 );
             } catch (error) {
-                clearTimeout(timer);
+                window.clearTimeout(timer);
                 this.pending.delete(requestId);
                 reject(
                     error instanceof Error ? error : new Error(String(error)),
@@ -384,7 +383,7 @@ export class MsgpackRpcClient {
         this.disposed = true;
         this.output.removeListener('data', this.onData);
         for (const request of this.pending.values()) {
-            clearTimeout(request.timer);
+            window.clearTimeout(request.timer);
             request.reject(reason);
         }
         this.pending.clear();
@@ -408,7 +407,7 @@ export class MsgpackRpcClient {
         if (typeof requestId !== 'number') return;
         const request = this.pending.get(requestId);
         if (!request) return;
-        clearTimeout(request.timer);
+        window.clearTimeout(request.timer);
         this.pending.delete(requestId);
         const error = values[2];
         if (error !== null && error !== undefined) {
