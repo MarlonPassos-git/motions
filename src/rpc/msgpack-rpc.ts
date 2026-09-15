@@ -10,7 +10,7 @@ type WritableStreamHandle = {
 type PendingRequest = {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
-    timer: ReturnType<typeof window.setTimeout>;
+    timer: number;
 };
 
 // A request Neovim never answers used to leave its promise pending forever.
