@@ -326,6 +326,101 @@ describe('Fold providers and placeholders (Phase 3)', function () {
     before(async function () {
         await browser.reloadObsidian({ vault: 'test-vault' });
         await loadSingleFileWorkspace();
+
+        // The macOS failure payload matched a passing local run in every field
+        // except window size, and three hypotheses drawn from it (degenerate
+        // range, viewport, detection) were all refuted. A failure-only probe
+        // cannot say what a passing platform looks like, so this runs
+        // everywhere and applies a fold effect directly: if CM6 ignores it,
+        // folding is unavailable rather than mis-driven. Reported, never
+        // asserted, and fully guarded so it cannot fail the suite.
+        try {
+            await setupEditor(CALLOUT_DOC, { line: 2, ch: 0 });
+            await browser.pause(PAUSE.EDITOR_SETTLE);
+            const env = await browser.executeObsidian(
+                ({ app, obsidian, require: req }) => {
+                    const view = app.workspace.getActiveViewOfType(
+                        obsidian.MarkdownView,
+                    );
+                    if (!view) return { error: 'no MarkdownView' };
+                    const lang = req('@codemirror/language') as {
+                        foldable: (
+                            state: unknown,
+                            a: number,
+                            b: number,
+                        ) => { from: number; to: number } | null;
+                        foldEffect: { of: (r: unknown) => unknown };
+                        foldedRanges: (state: unknown) => {
+                            iter: (from?: number) => {
+                                value: unknown;
+                                from: number;
+                                to: number;
+                                next: () => void;
+                            };
+                        };
+                    };
+                    const cm = (
+                        view.editor as unknown as Record<string, unknown>
+                    ).cm as
+                        | {
+                              state: {
+                                  doc: {
+                                      line: (n: number) => {
+                                          from: number;
+                                          to: number;
+                                      };
+                                  };
+                              };
+                              dispatch: (tr: unknown) => void;
+                          }
+                        | undefined;
+                    if (!cm) return { error: 'no CM6 view' };
+                    const line = cm.state.doc.line(3);
+                    const range = lang.foldable(cm.state, line.from, line.to);
+                    let applied = 'no range';
+                    if (range) {
+                        cm.dispatch({
+                            effects: lang.foldEffect.of({
+                                from: range.from,
+                                to: range.to,
+                            }),
+                        });
+                        const cursor = lang.foldedRanges(cm.state).iter(0);
+                        applied = cursor.value !== null ? 'stuck' : 'ignored';
+                    }
+                    const cfg = (
+                        app.vault as unknown as {
+                            getConfig?: (k: string) => unknown;
+                        }
+                    ).getConfig;
+                    return {
+                        range,
+                        directFoldEffect: applied,
+                        placeholders: document.querySelectorAll(
+                            '.cm-foldPlaceholder',
+                        ).length,
+                        foldHeading: cfg
+                            ? cfg.call(app.vault, 'foldHeading')
+                            : 'n/a',
+                        foldIndent: cfg
+                            ? cfg.call(app.vault, 'foldIndent')
+                            : 'n/a',
+                        legacyEditor: cfg
+                            ? cfg.call(app.vault, 'legacyEditor')
+                            : 'n/a',
+                        livePreview: (
+                            view as unknown as { getMode?: () => string }
+                        ).getMode?.(),
+                        window: `${window.innerWidth}x${window.innerHeight}`,
+                        devicePixelRatio: window.devicePixelRatio,
+                        platform: navigator.platform,
+                    };
+                },
+            );
+            console.log('FOLDENV ' + JSON.stringify(env));
+        } catch (error) {
+            console.log('FOLDENV ' + JSON.stringify({ threw: String(error) }));
+        }
     });
 
     describe('Frontmatter fold provider', function () {
