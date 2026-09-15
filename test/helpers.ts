@@ -761,6 +761,33 @@ export async function setPluginSetting(
     );
 }
 
+/**
+ * Whether this environment can paint a 2D canvas and read the pixels back.
+ *
+ * Checks the mechanism a canvas assertion relies on, deliberately not the
+ * feature under test, so it cannot mask a real defect: a runner that paints
+ * fine still runs the test and still fails it. Measured capability differs
+ * across runners — macOS reports no WebGL context at all where Linux and
+ * Windows report SwiftShader — and a test that cannot run should say so
+ * rather than fail.
+ */
+export async function canvasPaintSupported(): Promise<boolean> {
+    return browser.execute(() => {
+        try {
+            const c = document.createElement('canvas');
+            c.width = 8;
+            c.height = 8;
+            const ctx = c.getContext('2d');
+            if (!ctx) return false;
+            ctx.fillStyle = 'rgba(255,0,0,1)';
+            ctx.fillRect(0, 0, 8, 8);
+            return ctx.getImageData(0, 0, 8, 8).data[3] > 8;
+        } catch {
+            return false;
+        }
+    });
+}
+
 export async function setPluginSettingAndReload(
     key: string,
     value: unknown,

@@ -1,6 +1,12 @@
 import { browser, expect } from '@wdio/globals';
 import { obsidianPage } from 'wdio-obsidian-service';
-import { setupEditor, vimKeys, getCursorPos, PAUSE } from '../helpers';
+import {
+    PAUSE,
+    canvasPaintSupported,
+    getCursorPos,
+    setupEditor,
+    vimKeys,
+} from '../helpers';
 
 type PluginRef = {
     settings: Record<string, unknown>;
@@ -126,6 +132,10 @@ async function setPluginSettings(
 
 describe('Animated cursor', function () {
     before(async function () {
+        if (!(await canvasPaintSupported())) {
+            console.log('SKIP canvas readback unavailable on this runner');
+            this.skip();
+        }
         await browser.reloadObsidian({ vault: 'test-vault' });
         await obsidianPage.openFile('Welcome.md');
     });

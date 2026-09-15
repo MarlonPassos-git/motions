@@ -36,6 +36,15 @@ export const config: WebdriverIO.Config = {
     },
     waitforInterval: 250,
     waitforTimeout: 5000,
+    // A renderer busy longer than the HTTP client's patience kills the
+    // WebDriver session, and the death surfaces in whichever hook runs next
+    // rather than at the call that stalled: rpc-structural-nav reported
+    // UND_ERR_HEADERS_TIMEOUT on execute/sync, then invalid session id in
+    // afterEach, burying the real failure under an unrelated one. A slow
+    // renderer should produce a slow pass; the per-test mocha timeout above
+    // still bounds a genuine hang.
+    connectionRetryTimeout: 180000,
+    connectionRetryCount: 3,
     logLevel: 'warn',
     injectGlobals: false,
 

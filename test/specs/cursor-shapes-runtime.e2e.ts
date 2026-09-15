@@ -1,6 +1,11 @@
 import { browser, expect } from '@wdio/globals';
 import { obsidianPage } from 'wdio-obsidian-service';
-import { setupEditor, setPluginSettingAndReload, PAUSE } from '../helpers';
+import {
+    PAUSE,
+    canvasPaintSupported,
+    setPluginSettingAndReload,
+    setupEditor,
+} from '../helpers';
 
 // Follow-up to https://github.com/saberzero1/motions/issues/181
 //
@@ -154,6 +159,10 @@ async function pollPaintedHeight(): Promise<number> {
 
 describe('Cursor shapes applied at runtime (#181)', function () {
     before(async function () {
+        if (!(await canvasPaintSupported())) {
+            console.log('SKIP canvas readback unavailable on this runner');
+            this.skip();
+        }
         this.timeout(60000);
         await browser.reloadObsidian({ vault: 'test-vault' });
         await obsidianPage.openFile('Welcome.md');
