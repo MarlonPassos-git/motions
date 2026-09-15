@@ -414,6 +414,42 @@ describe('Fold providers and placeholders (Phase 3)', function () {
                         window: `${window.innerWidth}x${window.innerHeight}`,
                         devicePixelRatio: window.devicePixelRatio,
                         platform: navigator.platform,
+                        // Runner capability, so "the macOS box is too weak"
+                        // stops being an assumption. GPU-backed compositing is
+                        // the specific suspect for the canvas entries: a
+                        // virtualised macOS runner has no GPU, and a paint that
+                        // never happens there may never affect a real user.
+                        cores: navigator.hardwareConcurrency,
+                        memoryGb: (
+                            navigator as unknown as { deviceMemory?: number }
+                        ).deviceMemory,
+                        webgl: (() => {
+                            try {
+                                const c = document.createElement('canvas');
+                                const gl =
+                                    c.getContext('webgl') ??
+                                    c.getContext('experimental-webgl');
+                                if (!gl) return 'none';
+                                const dbg = (
+                                    gl as WebGLRenderingContext
+                                ).getExtension('WEBGL_debug_renderer_info');
+                                return dbg
+                                    ? String(
+                                          (
+                                              gl as WebGLRenderingContext
+                                          ).getParameter(
+                                              (
+                                                  dbg as {
+                                                      UNMASKED_RENDERER_WEBGL: number;
+                                                  }
+                                              ).UNMASKED_RENDERER_WEBGL,
+                                          ),
+                                      ).slice(0, 60)
+                                    : 'no-debug-info';
+                            } catch (e) {
+                                return `threw: ${String(e)}`;
+                            }
+                        })(),
                     };
                 },
             );
