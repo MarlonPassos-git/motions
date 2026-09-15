@@ -47,6 +47,39 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows   | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                         |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows   | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                            |
 
+## Next hypothesis for the fold pair: state within the spec
+
+Run `35025641995` failed the fold pair again with a payload identical to every
+previous one. Comparing it against the always-on probe in the same file is the
+part that had not been done:
+
+- the `before()` hook reports `directFoldEffect: "stuck"` — folding works
+- `zc on callout folds it` (test 4 of 8) and `editor:unfold-all` (8 of 8)
+  produce no fold at all
+
+Folding therefore works at the start of the spec and stops working later in
+the same file, on the same runner, in the same process. That is state
+accumulating across tests, not a property of the platform — and it is
+consistent with every refuted hypothesis so far, all of which looked for a
+macOS-versus-Linux difference.
+
+A probe must record foldability after **each** test in `fold-providers`, on a
+runner where it fails, and find the first test after which it stops. All eight
+pass locally, so this needs CI or a forced local equivalent of whatever that
+test leaves behind.
+
+## Canvas entries are intermittent, confirmed
+
+`cursor follows cursor movement` passed on macOS in `35008278154` and failed
+on macOS in `35025641995`, with no code change between them affecting it. It
+is intermittent on that runner rather than impossible there.
+
+## RPC entries after the connection timeout
+
+Two consecutive runs (`35008278154`, `35025641995`) contain no RPC failures,
+against three of five before `9fda566`. Encouraging and far from proven; the
+prior green run `0815d5c` was followed by two red ones on the same commit.
+
 ## Runner capability, measured
 
 |                    | Linux       | macOS    | Windows     |
