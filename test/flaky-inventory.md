@@ -44,6 +44,29 @@ skip on that condition explicitly rather than silently vary.
 | `matches backward operator-pending heading motion edits`                   | Linux     | 2                       | Unknown. Primary failure in the run whose afterEach then cascades.                                                                                                                                 |
 | `matches the fork for operators, visual selections, registers, and counts` | Windows   | 1                       | Unknown.                                                                                                                                                                                           |
 | `which-key shows after space press`                                        | Windows   | 1                       | Unknown. Polls 2000 ms for behaviour gated by `operatorshadowtimeout`'s 1000 ms deferral, so the margin is thin by construction.                                                                   |
+| `a config reload closes an open picker instead of leaking it`              | Windows   | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                         |
+| `uses the host jumplist for two cross-note older jumps`                    | Windows   | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                            |
+
+## Two runs of one commit share no failures
+
+`2b6bc75` was run twice with no code change between them:
+
+| Run A                                                                   | Run B                                                             |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `"after each" hook — RPC structural navigation` (Linux)                 | —                                                                 |
+| `matches backward operator-pending heading motion edits` (Linux)        | —                                                                 |
+| `zc on callout folds it` (macOS)                                        | —                                                                 |
+| `editor:unfold-all clears all folds including custom` (macOS)           | —                                                                 |
+| `a config reload closes an open picker instead of leaking it` (Windows) | —                                                                 |
+| —                                                                       | `uses the host jumplist for two cross-note older jumps` (Windows) |
+
+The sets are disjoint. Whatever selects the failures on a given run, it is not
+the commit, so a single green run says nothing and a single red one identifies
+only which test drew the short straw that time.
+
+Measured across the five runs containing `34168dd`: the fold pair failed in
+three and the RPC structural-nav pair in three, both matching their pre-fix
+rates. That is the basis for saying the toggle fix did not touch them.
 
 ## Shard numbers do not identify specs
 
