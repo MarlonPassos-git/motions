@@ -142,6 +142,21 @@ a rapid double toggle applies both halves instead of swallowing the second. If
 the debounce was guarding against real thrash, the better design is coalescing
 (record the desired end state, apply once) rather than applying both.
 
+### Every extension-slot feature was exposed
+
+`setupVimSubsystems()` nests the per-feature slots inside the one the toggle
+emptied — `animatedCursorSlot` (`src/main.ts:2831`), `undoTreeSlot` (:2746)
+and the three snippet slots (:2785-2787). A dropped enable therefore took all
+of them down together, not folding alone.
+
+That makes one mechanism a candidate for several entries above, including
+both animated-cursor entries, whose CI signature is a canvas that never
+paints. **Not yet confirmed by measurement**: a local probe misconfigured its
+own precondition (`setPluginSetting` stores the value but does not reload
+features — `setPluginSettingAndReload` does), so it produced `canvases: 0` at
+baseline and proved nothing. Re-run it with the reloading helper before
+treating this as established.
+
 ### Why this may not be only about folding
 
 `wdio.conf.mts` cycles vim mode before every spec, and `AGENTS.md` records
