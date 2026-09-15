@@ -284,7 +284,12 @@ export class GlobalKeyHandler {
         }
 
         if (e.isComposing) return;
-        if (this.translateFileExplorerNavigation(e, doc)) return;
+        if (
+            this.keyBuffer.length === 0 &&
+            !this.countActive &&
+            this.translateFileExplorerNavigation(e, doc)
+        )
+            return;
 
         const key = normalizeKeyEvent(e);
         const prospectiveSeq = [...this.keyBuffer, key].join('');
