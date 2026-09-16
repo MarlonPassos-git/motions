@@ -13,9 +13,13 @@ on:
                 required: true
                 default: 'test/specs/fold-providers.e2e.ts'
             iterations:
-                description: 'How many times to run it'
+                description: 'Iterations per job (iteration 1 is the only cold one)'
                 required: true
                 default: '15'
+            parallel:
+                description: 'Parallel jobs, each contributing one cold start'
+                required: true
+                default: '1'
             os:
                 description: 'Runner'
                 required: true
@@ -27,8 +31,34 @@ on:
                     - ubuntu-latest
 
 jobs:
+    # Only the first iteration of a job is a cold start, and a cold start is
+    # what fails: across six runs every failure was iteration 1, and iteration 1
+    # itself fails roughly two times in three. One job therefore yields one
+    # sample of the interesting case no matter how many iterations it runs, so
+    # replicas are the way to collect several.
+    plan:
+        runs-on: ubuntu-latest
+        outputs:
+            replicas: ${{ steps.mk.outputs.replicas }}
+        steps:
+            - id: mk
+              run: |
+                  n=${{ inputs.parallel }}
+                  printf 'replicas=['
+                  for i in $(seq 1 "$n"); do
+                    [ "$i" -gt 1 ] && printf ','
+                    printf '%s' "$i"
+                  done
+                  printf ']\n'
+              shell: bash
+
     stress:
-        name: stress ${{ inputs.spec }} x${{ inputs.iterations }} on ${{ inputs.os }}
+        needs: plan
+        name: stress ${{ inputs.os }} replica ${{ matrix.replica }}
+        strategy:
+            fail-fast: false
+            matrix:
+                replica: ${{ fromJson(needs.plan.outputs.replicas) }}
         runs-on: ${{ inputs.os }}
         timeout-minutes: 350
         env:
@@ -114,7 +144,7 @@ jobs:
                   done
 
                   {
-                    echo "### Stress: \`${{ inputs.spec }}\` x${{ inputs.iterations }} on ${{ inputs.os }}"
+                    echo "### Stress replica ${{ matrix.replica }}: \`${{ inputs.spec }}\` x${{ inputs.iterations }} on ${{ inputs.os }}"
                     echo
                     echo "| result | count |"
                     echo "| --- | --- |"
