@@ -32,7 +32,7 @@ skip on that condition explicitly rather than silently vary.
 | Test                                                                       | Platform  | Observed                | Status                                                                                                                                                                                             |
 | -------------------------------------------------------------------------- | --------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `g- does not crash at root`                                                | all three | 4 runs                  | **Resolved — product.** Stale `this.undoTree` captured at registration; `activateUndoTreeForFile()` swaps it per note. Fixed in `ff8442a`.                                                         |
-| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Resolved — environment.** The CI window sometimes has no OS focus, so Live Preview keeps the callout a widget. 16/16 correlation. Skipped with a reason.                                         |
+| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Resolved — environment.** The CI window starts without OS focus; waiting for it to arrive fixes the suite (0/8 cold failures, 0 skips). 16/16 correlation.                                       |
 | `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Resolved — environment.** Same cause.                                                                                                                                                            |
 | `cursor follows cursor movement`                                           | macOS     | 2 of last 3             | Unknown. Defined in `animated-cursor.e2e.ts`, which is **not** the scroll spec: an earlier note here tied it to #181 ("breaks when scrolling") on a misread filename. No established link to #181. |
 | `]3 should jump to next H3`                                                | macOS     | 3/5                     | Unknown. Candidate: the same toggle race, since `beforeSuite` cycles vim before every spec.                                                                                                        |
@@ -62,11 +62,24 @@ callout rendered as a widget, nothing can fold inside it, and the document
 content is correct throughout — which is why eleven hypotheses looking for a
 macOS-versus-Linux behavioural difference found nothing.
 
-Neither remedy worked. `editor.focus()` cannot raise a window, and
-`Page.bringToFront` addresses the renderer rather than the OS window; with it
-in place 5 of 8 cold starts were still unfocused. `ensureWindowFocused` now
-also asks Electron to raise the window and reports the result, and the spec
-skips with a reason when it is still false.
+Waiting for focus fixes it. `editor.focus()` cannot raise a window and
+`Page.bringToFront` addresses the renderer rather than the OS window, so
+neither helped. But focus does arrive on a cold start, just not immediately:
+`ensureWindowFocused` retries for five seconds, and the suite then runs in the
+focused state the assertions need. The skip is a fallback that should rarely
+fire.
+
+Measured across eight cold macOS starts per configuration:
+
+|                        | cold failures | suites skipped                                   |
+| ---------------------- | ------------- | ------------------------------------------------ |
+| no guard               | 2/8, then 5/8 | —                                                |
+| focus sampled once     | —             | 6/8, over-skipping suites that would have passed |
+| focus awaited up to 5s | 0/8           | 0/8                                              |
+
+Sampling focus once was itself a defect of the same family as a vacuous
+assertion: it reported safety that had never been established, disabling six
+suites to absorb a failure rate of two to five in eight.
 
 A user's window is focused while they type in it, so this describes the
 runner and not the plugin. **The canvas entries are not explained by it**:
