@@ -47,6 +47,39 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows   | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                         |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows   | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                            |
 
+## The fold pair fails on a cold start, and renders differently when it does
+
+Two stress runs, and both failed on **iteration 1**:
+
+|                       | iter 1 (fail) | iters 2-8 (pass) |
+| --------------------- | ------------- | ---------------- |
+| `.cm-foldPlaceholder` | 0             | 1                |
+| `.cm-line` count      | 4             | 5                |
+| content height        | 563           | 490              |
+| editor height         | 598           | 598              |
+| `getMode()`           | source        | source           |
+| `directFoldEffect`    | stuck         | stuck            |
+
+The fold reaches state either way. What differs is rendering: on the cold
+iteration the callout occupies fewer line elements and more vertical space,
+which is a decorated block rather than plain lines, and no fold placeholder
+appears. Mode is `source` in both, so this is not reading view.
+
+**This invalidates how the stress tool's rates should be read.** A shard job
+in `e2e.yml` runs wdio exactly once, so every real CI job is iteration 1. A
+stress run of N iterations contains one cold start and N-1 warm ones, which
+is why the same spec measures ~7% under stress and ~60% in CI. Stress
+underestimates any cold-start failure by roughly a factor of N.
+
+Refuted along the way: state accumulation within the spec (`foldable` stays
+true after all eight tests), and every earlier platform-difference
+hypothesis, since the discriminator is warm-versus-cold on one runner rather
+than macOS-versus-Linux.
+
+The remaining question is what the callout is decorated with on a cold start.
+The next probe should capture the callout element's own markup and computed
+box in both states rather than aggregate counts.
+
 ## Next hypothesis for the fold pair: state within the spec
 
 Run `35025641995` failed the fold pair again with a payload identical to every
