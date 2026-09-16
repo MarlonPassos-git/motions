@@ -3,6 +3,7 @@ import { obsidianPage } from 'wdio-obsidian-service';
 import {
     PAUSE,
     canvasPaintSupported,
+    ensureWindowFocused,
     getCursorPos,
     setupEditor,
     vimKeys,
@@ -179,6 +180,13 @@ describe('Animated cursor', function () {
         }
         await browser.reloadObsidian({ vault: 'test-vault' });
         await obsidianPage.openFile('Welcome.md');
+
+        // Must run after reloadObsidian: beforeSuite raises the window before
+        // the spec reloads Obsidian, and the reload discards it. The fold
+        // specs call this after their own load and went from five failures in
+        // eight to none; the canvas specs did not, and kept failing with
+        // document.hasFocus() false.
+        await ensureWindowFocused();
 
         // The give-up diagnostic only runs on failure, so the failing macOS
         // replicas reported reducedMotion true and an unfocused window with

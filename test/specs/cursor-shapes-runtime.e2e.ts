@@ -3,6 +3,7 @@ import { obsidianPage } from 'wdio-obsidian-service';
 import {
     PAUSE,
     canvasPaintSupported,
+    ensureWindowFocused,
     setPluginSettingAndReload,
     setupEditor,
 } from '../helpers';
@@ -171,6 +172,13 @@ describe('Cursor shapes applied at runtime (#181)', function () {
         this.timeout(60000);
         await browser.reloadObsidian({ vault: 'test-vault' });
         await obsidianPage.openFile('Welcome.md');
+
+        // Must run after reloadObsidian: beforeSuite raises the window before
+        // the spec reloads Obsidian, and the reload discards it. The fold
+        // specs call this after their own load and went from five failures in
+        // eight to none; the canvas specs did not, and kept failing with
+        // document.hasFocus() false.
+        await ensureWindowFocused();
     });
 
     after(async function () {
