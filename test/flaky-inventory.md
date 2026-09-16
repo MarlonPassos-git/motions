@@ -32,8 +32,8 @@ skip on that condition explicitly rather than silently vary.
 | Test                                                                       | Platform  | Observed                | Status                                                                                                                                                                                             |
 | -------------------------------------------------------------------------- | --------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `g- does not crash at root`                                                | all three | 4 runs                  | **Resolved — product.** Stale `this.undoTree` captured at registration; `activateUndoTreeForFile()` swaps it per note. Fixed in `ff8442a`.                                                         |
-| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Unresolved.** The callout is still a Live Preview widget when the fold is attempted, and waiting for it to unrender times out. Evidence below.                                                   |
-| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Unresolved.** Same cause.                                                                                                                                                                        |
+| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Resolved — environment.** The CI window sometimes has no OS focus, so Live Preview keeps the callout a widget. 16/16 correlation. Skipped with a reason.                                         |
+| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Resolved — environment.** Same cause.                                                                                                                                                            |
 | `cursor follows cursor movement`                                           | macOS     | 2 of last 3             | Unknown. Defined in `animated-cursor.e2e.ts`, which is **not** the scroll spec: an earlier note here tied it to #181 ("breaks when scrolling") on a misread filename. No established link to #181. |
 | `]3 should jump to next H3`                                                | macOS     | 3/5                     | Unknown. Candidate: the same toggle race, since `beforeSuite` cycles vim before every spec.                                                                                                        |
 | `the animated cursor picks up a shape change (#181)`                       | macOS     | 1                       | Unknown. Fails on its canvas-paint precondition, not on the scroll defect #181 describes.                                                                                                          |
@@ -46,6 +46,31 @@ skip on that condition explicitly rather than silently vary.
 | `which-key shows after space press`                                        | Windows   | 1                       | Unknown. Polls 2000 ms for behaviour gated by `operatorshadowtimeout`'s 1000 ms deferral, so the margin is thin by construction.                                                                   |
 | `a config reload closes an open picker instead of leaking it`              | Windows   | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                         |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows   | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                            |
+
+## Fold pair: an unfocused CI window
+
+`document.hasFocus()` matched the outcome 16 times out of 16 across two runs
+of eight cold macOS starts:
+
+|            | hasFocus | cm-focused | callout                      | placeholders | result |
+| ---------- | -------- | ---------- | ---------------------------- | ------------ | ------ |
+| 9 replicas | true     | present    | editable lines               | 1            | pass   |
+| 7 replicas | false    | absent     | `.cm-embed-block.cm-callout` | 0            | fail   |
+
+Without OS focus CodeMirror never registers focus, Live Preview keeps the
+callout rendered as a widget, nothing can fold inside it, and the document
+content is correct throughout — which is why eleven hypotheses looking for a
+macOS-versus-Linux behavioural difference found nothing.
+
+Neither remedy worked. `editor.focus()` cannot raise a window, and
+`Page.bringToFront` addresses the renderer rather than the OS window; with it
+in place 5 of 8 cold starts were still unfocused. `ensureWindowFocused` now
+also asks Electron to raise the window and reports the result, and the spec
+skips with a reason when it is still false.
+
+A user's window is focused while they type in it, so this describes the
+runner and not the plugin. **The canvas entries are not explained by it**:
+both canvas specs ran on the unfocused replicas and passed.
 
 ## Fold pair: cause identified, fix not yet found
 

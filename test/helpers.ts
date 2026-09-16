@@ -187,6 +187,45 @@ export async function getRegisterContent(
     )) as { text: string; linewise: boolean } | null;
 }
 
+/**
+ * Try to give the Obsidian window real focus, and report whether it has it.
+ *
+ * An unfocused window is not cosmetic: CodeMirror never registers focus, so
+ * Live Preview keeps callouts rendered as widgets and any assertion about
+ * decorated content fails while the document itself is correct. Measured over
+ * two runs of eight cold macOS starts, document.hasFocus() matched the outcome
+ * 16 times out of 16.
+ *
+ * Page.bringToFront addresses the renderer rather than the OS window and did
+ * not help, so this also asks Electron to raise the window. Callers should
+ * skip rather than fail when it still returns false: a real user's window is
+ * focused, so the failure describes the runner and not the plugin.
+ */
+export async function ensureWindowFocused(): Promise<boolean> {
+    return browser.executeObsidian(() => {
+        if (!document.hasFocus()) {
+            try {
+                const electron = (
+                    window as unknown as {
+                        require?: (m: string) => unknown;
+                    }
+                ).require?.('electron') as
+                    | {
+                          remote?: {
+                              getCurrentWindow?: () => { focus?: () => void };
+                          };
+                      }
+                    | undefined;
+                electron?.remote?.getCurrentWindow?.()?.focus?.();
+            } catch {
+                /* not available in every host */
+            }
+            window.focus();
+        }
+        return document.hasFocus();
+    });
+}
+
 export async function setupEditor(
     content: string,
     cursor: { line: number; ch: number },
