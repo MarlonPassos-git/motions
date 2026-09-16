@@ -32,8 +32,8 @@ skip on that condition explicitly rather than silently vary.
 | Test                                                                       | Platform  | Observed                | Status                                                                                                                                                                                             |
 | -------------------------------------------------------------------------- | --------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `g- does not crash at root`                                                | all three | 4 runs                  | **Resolved — product.** Stale `this.undoTree` captured at registration; `activateUndoTreeForFile()` swaps it per note. Fixed in `ff8442a`.                                                         |
-| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Resolved — test.** The callout was still a Live Preview widget when the fold was attempted. Fixed in `7b1ea12`+. Evidence below.                                                                 |
-| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Resolved — test.** Same cause and same fix.                                                                                                                                                      |
+| `zc on callout folds it`                                                   | macOS     | 3/5, then 2/3           | **Unresolved.** The callout is still a Live Preview widget when the fold is attempted, and waiting for it to unrender times out. Evidence below.                                                   |
+| `editor:unfold-all clears all folds including custom`                      | macOS     | with the above          | **Unresolved.** Same cause.                                                                                                                                                                        |
 | `cursor follows cursor movement`                                           | macOS     | 2 of last 3             | Unknown. Defined in `animated-cursor.e2e.ts`, which is **not** the scroll spec: an earlier note here tied it to #181 ("breaks when scrolling") on a misread filename. No established link to #181. |
 | `]3 should jump to next H3`                                                | macOS     | 3/5                     | Unknown. Candidate: the same toggle race, since `beforeSuite` cycles vim before every spec.                                                                                                        |
 | `the animated cursor picks up a shape change (#181)`                       | macOS     | 1                       | Unknown. Fails on its canvas-paint precondition, not on the scroll defect #181 describes.                                                                                                          |
@@ -47,7 +47,7 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows   | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                         |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows   | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                            |
 
-## Fold pair: resolved
+## Fold pair: cause identified, fix not yet found
 
 Live Preview renders a callout as a `.cm-embed-block.cm-callout` widget and
 unrenders it to editable lines only once the cursor is inside. On a cold start
@@ -62,6 +62,19 @@ Measured, cold versus warm on the same runner and commit:
 | callout / embed elements  | 1 / 1                                | 0 / 0                                       |
 | third `.cm-content` child | `div.cm-embed-block.cm-callout[125]` | `div.cm-line…HyperMD-callout…cm-active[24]` |
 | `.cm-foldPlaceholder`     | 0                                    | 1                                           |
+
+The obvious fix does not work. Waiting for `.cm-embed-block.cm-callout` to
+disappear before folding **times out on a cold start**, turning two failures
+into four: `callout line is foldable` and `callout fold placeholder contains
+callout type` were passing only because `foldable()` returns a range for a
+widget-rendered region, so they were passing vacuously in exactly the state
+that breaks the other two. The wait was reverted rather than left on master.
+
+So the callout never becomes editable on a cold start, which means the cursor
+never lands inside it — `setupEditor`'s cursor placement is not taking effect
+there. That is the next thing to measure: the cursor position and editor focus
+immediately after `setupEditor` on a cold iteration, not the callout markup
+that follows from them.
 
 `waitUntilFoldable` cannot see this: `foldable()` is a state query and returns
 a range while the region is still a widget, so the precondition it checked was
