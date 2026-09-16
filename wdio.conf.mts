@@ -86,6 +86,25 @@ export const config: WebdriverIO.Config = {
             /* best effort: without focus the suite still runs, just flakily */
         }
 
+        // bringToFront addresses the renderer, not the OS window, so it is not
+        // enough on its own. Focus does arrive on a cold start, just not
+        // immediately, so wait for it: measured over eight cold macOS starts
+        // per cluster, document.hasFocus() matched the outcome every time, for
+        // the fold specs and the animated-cursor specs alike. Waiting cleared
+        // the fold failures outright.
+        try {
+            await browser.waitUntil(
+                async () =>
+                    browser.execute(() => {
+                        if (!document.hasFocus()) window.focus();
+                        return document.hasFocus();
+                    }),
+                { timeout: 5000, interval: 250 },
+            );
+        } catch {
+            /* a window that never gains focus is reported by the specs */
+        }
+
         try {
             const hasToggle = await browser.executeObsidian(({ app }) => {
                 return !!(
