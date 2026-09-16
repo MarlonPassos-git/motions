@@ -179,6 +179,27 @@ describe('Animated cursor', function () {
         }
         await browser.reloadObsidian({ vault: 'test-vault' });
         await obsidianPage.openFile('Welcome.md');
+
+        // The give-up diagnostic only runs on failure, so the failing macOS
+        // replicas reported reducedMotion true and an unfocused window with
+        // nothing to compare against. Report the same fields unconditionally
+        // so passing replicas can discriminate which of the two matters.
+        console.log(
+            'CURSORENV ' +
+                JSON.stringify(
+                    await browser.execute(() => ({
+                        reducedMotion: window.matchMedia(
+                            '(prefers-reduced-motion: reduce)',
+                        ).matches,
+                        docHasFocus: document.hasFocus(),
+                        cmFocused: !!document.querySelector(
+                            '.cm-editor.cm-focused',
+                        ),
+                        devicePixelRatio: window.devicePixelRatio,
+                        window: `${window.innerWidth}x${window.innerHeight}`,
+                    })),
+                ),
+        );
     });
 
     after(async function () {
