@@ -58,6 +58,34 @@ export const config: WebdriverIO.Config = {
     },
 
     async beforeSuite() {
+        // Eight cold macOS starts correlated perfectly: the two that failed had
+        // document.hasFocus() false, all six that passed had it true. An
+        // unfocused window means CodeMirror never registers focus, Live Preview
+        // keeps callouts rendered as widgets, and anything asserting on
+        // decorated content fails while the document itself is correct.
+        // Re-calling editor.focus() cannot fix it; the window has to be raised.
+        // A real user's window is focused, so this restores the real condition
+        // rather than skipping the tests.
+        try {
+            const puppeteer = (await (
+                browser as unknown as {
+                    getPuppeteer(): Promise<{ pages(): Promise<unknown[]> }>;
+                }
+            ).getPuppeteer()) as { pages(): Promise<unknown[]> };
+            const pages = await puppeteer.pages();
+            const page = pages[0] as {
+                target(): {
+                    createCDPSession(): Promise<{
+                        send(method: string): Promise<unknown>;
+                    }>;
+                };
+            };
+            const session = await page.target().createCDPSession();
+            await session.send('Page.bringToFront');
+        } catch {
+            /* best effort: without focus the suite still runs, just flakily */
+        }
+
         try {
             const hasToggle = await browser.executeObsidian(({ app }) => {
                 return !!(
