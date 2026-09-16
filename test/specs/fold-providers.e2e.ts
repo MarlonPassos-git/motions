@@ -439,6 +439,35 @@ describe('Fold providers and placeholders (Phase 3)', function () {
                             ) as HTMLElement | null
                         )?.getBoundingClientRect().height,
                         lineCount: document.querySelectorAll('.cm-line').length,
+                        // Aggregate counts showed the cold start renders the
+                        // callout as fewer, taller elements without a fold
+                        // placeholder. These name the decoration responsible.
+                        lineClasses: Array.from(
+                            document.querySelectorAll('.cm-content > *'),
+                        )
+                            .slice(0, 8)
+                            .map(
+                                (el) =>
+                                    `${el.tagName.toLowerCase()}.${(
+                                        el.className || ''
+                                    )
+                                        .toString()
+                                        .split(/\s+/)
+                                        .filter(Boolean)
+                                        .join('.')}` +
+                                    `[${Math.round(
+                                        (
+                                            el as HTMLElement
+                                        ).getBoundingClientRect().height,
+                                    )}]`,
+                            ),
+                        calloutCount:
+                            document.querySelectorAll('.callout').length,
+                        embedBlocks:
+                            document.querySelectorAll('.cm-embed-block').length,
+                        widgetBuffers:
+                            document.querySelectorAll('.cm-widgetBuffer')
+                                .length,
                         docVisible: document.visibilityState,
                         cores: navigator.hardwareConcurrency,
                         memoryGb: (
