@@ -461,6 +461,26 @@ describe('Fold providers and placeholders (Phase 3)', function () {
                                         ).getBoundingClientRect().height,
                                     )}]`,
                             ),
+                        // Waiting for the callout widget to unrender timed out
+                        // on a cold start, so the cursor is probably never
+                        // landing inside it. These check that directly rather
+                        // than the markup that follows from it.
+                        cursor: (() => {
+                            try {
+                                const c = view.editor.getCursor();
+                                return { line: c.line, ch: c.ch };
+                            } catch (e) {
+                                return `threw: ${String(e)}`;
+                            }
+                        })(),
+                        cmFocused: !!document.querySelector(
+                            '.cm-editor.cm-focused',
+                        ),
+                        activeEl: `${document.activeElement?.tagName ?? '?'}.${(
+                            document.activeElement?.className || ''
+                        )
+                            .toString()
+                            .slice(0, 40)}`,
                         calloutCount:
                             document.querySelectorAll('.callout').length,
                         embedBlocks:
