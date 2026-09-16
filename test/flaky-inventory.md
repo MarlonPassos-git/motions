@@ -47,6 +47,26 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows   | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                         |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows   | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                            |
 
+## What "resolved" means for the two product bugs
+
+**`g-`** — defect fixed and guarded. `undo-tree.e2e.ts:168` asserts the live
+tree's sequence moves, and its negative control was recorded: the unfixed
+build reported `Expected: 19, Received: 20`.
+
+**Vim toggle** — defect fixed, and guarded only at the settings level.
+`vim-toggle.e2e.ts` "rapid toggle applies both requests and ends enabled"
+fails when the cooldown is un-awaited, so it does catch the mechanism.
+
+Nothing asserts the consequence that actually hurt: that extension-slot
+features survive a rapid toggle. An attempt to add one was removed because it
+could not be made to fail — with the awaited cooldown reverted it still
+passed, since the serialised chain and the deferred callback checks prevent
+the drop on their own. A test that cannot fail is worse than none, so it went
+rather than staying as decoration.
+
+Closing this properly needs a control that reverts all three parts of
+`34168dd` at once, not one of them.
+
 ## Fold pair: an unfocused CI window
 
 `document.hasFocus()` matched the outcome 16 times out of 16 across two runs
