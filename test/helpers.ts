@@ -202,28 +202,42 @@ export async function getRegisterContent(
  * focused, so the failure describes the runner and not the plugin.
  */
 export async function ensureWindowFocused(): Promise<boolean> {
-    return browser.executeObsidian(() => {
-        if (!document.hasFocus()) {
-            try {
-                const electron = (
-                    window as unknown as {
-                        require?: (m: string) => unknown;
-                    }
-                ).require?.('electron') as
-                    | {
-                          remote?: {
-                              getCurrentWindow?: () => { focus?: () => void };
-                          };
-                      }
-                    | undefined;
-                electron?.remote?.getCurrentWindow?.()?.focus?.();
-            } catch {
-                /* not available in every host */
+    // Sampling focus once skipped six of eight suites that would mostly have
+    // passed: focus often arrives shortly after the workspace loads, well
+    // before the assertions run. Retry for a few seconds and only report
+    // failure when it never arrives.
+    const attempt = async (): Promise<boolean> =>
+        browser.executeObsidian(() => {
+            if (!document.hasFocus()) {
+                try {
+                    const electron = (
+                        window as unknown as {
+                            require?: (m: string) => unknown;
+                        }
+                    ).require?.('electron') as
+                        | {
+                              remote?: {
+                                  getCurrentWindow?: () => {
+                                      focus?: () => void;
+                                  };
+                              };
+                          }
+                        | undefined;
+                    electron?.remote?.getCurrentWindow?.()?.focus?.();
+                } catch {
+                    /* not available in every host */
+                }
+                window.focus();
             }
-            window.focus();
-        }
-        return document.hasFocus();
-    });
+            return document.hasFocus();
+        });
+
+    try {
+        await browser.waitUntil(attempt, { timeout: 5000, interval: 250 });
+        return true;
+    } catch {
+        return attempt();
+    }
 }
 
 export async function setupEditor(
