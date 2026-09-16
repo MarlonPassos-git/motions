@@ -180,6 +180,31 @@ async function foldDiagnostics(line: number): Promise<unknown> {
     );
 }
 
+// Live Preview renders a callout as a .cm-embed-block.cm-callout widget and
+// only unrenders it to editable lines once the cursor is inside. Folding a
+// widget-rendered callout produces no placeholder and no visible fold, which
+// is what failed on every cold start: three stress runs, all on iteration 1,
+// all with callout=1 embed=1 placeholders=0 while the warm iterations had the
+// cursor on the line and callout=0.
+//
+// waitUntilFoldable cannot see this. foldable() is a state query and returns a
+// range while the region is still a widget, so the precondition it checks is
+// not the precondition the assertion needs.
+async function waitUntilCalloutEditable(): Promise<void> {
+    await browser.waitUntil(
+        async () =>
+            browser.execute(
+                () => !document.querySelector('.cm-embed-block.cm-callout'),
+            ),
+        {
+            timeout: 5000,
+            interval: 50,
+            timeoutMsg:
+                'callout stayed rendered as a .cm-embed-block.cm-callout widget',
+        },
+    );
+}
+
 // zc can only fold a range the provider has already computed. Waiting for
 // the fold afterwards cannot help: if zc ran before the provider was ready
 // it folded nothing and no amount of waiting produces the effect. Wait for
@@ -336,6 +361,7 @@ describe('Fold providers and placeholders (Phase 3)', function () {
         // asserted, and fully guarded so it cannot fail the suite.
         try {
             await setupEditor(CALLOUT_DOC, { line: 2, ch: 0 });
+            await waitUntilCalloutEditable();
             await browser.pause(PAUSE.EDITOR_SETTLE);
             const env = await browser.executeObsidian(
                 ({ app, obsidian, require: req }) => {
@@ -513,6 +539,7 @@ describe('Fold providers and placeholders (Phase 3)', function () {
         const title = this.currentTest?.title ?? '?';
         try {
             await setupEditor(CALLOUT_DOC, { line: 2, ch: 0 });
+            await waitUntilCalloutEditable();
             await browser.pause(PAUSE.EDITOR_SETTLE);
             const foldable = await isFoldableAt(2);
             const env = await foldDiagnostics(2);
@@ -627,11 +654,13 @@ describe('Fold providers and placeholders (Phase 3)', function () {
     describe('Callout fold provider', function () {
         it('callout line is foldable', async function () {
             await setupEditor(CALLOUT_DOC, { line: 2, ch: 0 });
+            await waitUntilCalloutEditable();
             expect(await isFoldableAt(2)).toBe(true);
         });
 
         it('zc on callout folds it', async function () {
             await setupEditor(CALLOUT_DOC, { line: 2, ch: 0 });
+            await waitUntilCalloutEditable();
 
             await sendVimEscape();
             await browser.pause(PAUSE.MODE_SWITCH);
@@ -660,6 +689,7 @@ describe('Fold providers and placeholders (Phase 3)', function () {
 
         it('callout fold placeholder contains callout type', async function () {
             await setupEditor(CALLOUT_DOC, { line: 2, ch: 0 });
+            await waitUntilCalloutEditable();
 
             await sendVimEscape();
             await browser.pause(PAUSE.MODE_SWITCH);
@@ -694,6 +724,7 @@ describe('Fold providers and placeholders (Phase 3)', function () {
 
         it('editor:unfold-all clears all folds including custom', async function () {
             await setupEditor(CALLOUT_DOC, { line: 2, ch: 0 });
+            await waitUntilCalloutEditable();
 
             await sendVimEscape();
             await browser.pause(PAUSE.MODE_SWITCH);
