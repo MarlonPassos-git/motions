@@ -240,6 +240,27 @@ export async function setupEditor(
             { timeout: 2000, interval: 50 },
         )
         .catch(() => {});
+    // editor.focus() above does not guarantee CodeMirror has registered focus,
+    // and on a cold start it measurably does not: a failing run recorded the
+    // cursor correctly at line 2 with document.activeElement on .cm-content,
+    // but no .cm-editor.cm-focused. Live Preview keeps a callout rendered as a
+    // widget while the editor is unfocused, so anything asserting on decorated
+    // content fails without the content itself being wrong. Re-focus until
+    // CodeMirror agrees rather than waiting on a consequence of focus.
+    await browser
+        .waitUntil(
+            async () =>
+                browser.executeObsidian(({ app, obsidian }) => {
+                    if (document.querySelector('.cm-editor.cm-focused'))
+                        return true;
+                    app.workspace
+                        .getActiveViewOfType(obsidian.MarkdownView)
+                        ?.editor.focus();
+                    return false;
+                }),
+            { timeout: 3000, interval: 100 },
+        )
+        .catch(() => {});
     await browser.pause(PAUSE.EDITOR_SETTLE);
 }
 
