@@ -476,6 +476,11 @@ describe('Fold providers and placeholders (Phase 3)', function () {
                         cmFocused: !!document.querySelector(
                             '.cm-editor.cm-focused',
                         ),
+                        // Re-focusing for three seconds did not make CodeMirror
+                        // register focus, so the window itself may not be
+                        // focused at the OS level -- which a real user's window
+                        // always is.
+                        docHasFocus: document.hasFocus(),
                         activeEl: `${document.activeElement?.tagName ?? '?'}.${(
                             document.activeElement?.className || ''
                         )
@@ -687,10 +692,14 @@ describe('Fold providers and placeholders (Phase 3)', function () {
             await sendVimKeys('z', 'c');
             await browser.pause(PAUSE.EDITOR_SETTLE);
 
+            // The assertion used to sit inside `if (placeholders.length > 0
+            // && placeholders[0] !== '…')`, so it checked nothing whenever no
+            // placeholder rendered -- which is precisely the cold-start state
+            // that breaks the neighbouring fold tests. It passed there by
+            // asserting nothing at all.
             const placeholders = await getFoldPlaceholderText();
-            if (placeholders.length > 0 && placeholders[0] !== '…') {
-                expect(placeholders[0]).toContain('tip');
-            }
+            expect(placeholders.length).toBeGreaterThan(0);
+            expect(placeholders[0]).toContain('tip');
         });
     });
 

@@ -164,7 +164,7 @@ jobs:
               if: always()
               uses: actions/upload-artifact@v4
               with:
-                  name: stress-traces-${{ inputs.os }}
+                  name: stress-traces-${{ inputs.os }}-${{ matrix.replica }}
                   path: |
                       traces.txt
                       failing-tests.txt

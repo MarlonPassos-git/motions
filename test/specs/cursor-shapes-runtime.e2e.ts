@@ -145,6 +145,11 @@ async function pollPaintedHeight(): Promise<number> {
             styleWidths: canvases.map((c) => c.style.width),
             reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)')
                 .matches,
+            // The fold failures turned out to be an unfocused editor keeping
+            // Live Preview widgets rendered. The cursor canvas draws the
+            // cursor, so an unfocused editor is a candidate here too.
+            cmFocused: !!document.querySelector('.cm-editor.cm-focused'),
+            docHasFocus: document.hasFocus(),
             hidden: document.hidden,
             devicePixelRatio: window.devicePixelRatio,
             animatedCursor: picked?.animatedCursor,
