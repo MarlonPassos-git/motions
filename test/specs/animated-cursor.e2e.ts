@@ -82,6 +82,47 @@ async function pollPaintedCursor(): Promise<{
         await browser.pause(90);
         last = await paintedCursorBounds();
     }
+    // painted false on its own says only that no pixel was found, which cannot
+    // distinguish a canvas that is absent, mis-sized, hidden, or simply never
+    // drawn on. Focus is already ruled out for this spec: both canvas specs
+    // passed on the unfocused replicas that failed the fold specs.
+    if (!last.painted) {
+        const diagnosis = await browser.executeObsidian(({ app, obsidian }) => {
+            const canvases = Array.from(
+                document.querySelectorAll(
+                    '.vim-motions-animated-cursor-canvas',
+                ),
+            ) as HTMLCanvasElement[];
+            const view = app.workspace.getActiveViewOfType(
+                obsidian.MarkdownView,
+            );
+            return {
+                canvasCount: canvases.length,
+                sizes: canvases.map((c) => `${c.width}x${c.height}`),
+                styleWidths: canvases.map((c) => c.style.width),
+                display: canvases.map((c) => getComputedStyle(c).display),
+                opacity: canvases.map((c) => getComputedStyle(c).opacity),
+                rects: canvases.map((c) => {
+                    const r = c.getBoundingClientRect();
+                    return `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.top)}`;
+                }),
+                docHasFocus: document.hasFocus(),
+                cmFocused: !!document.querySelector('.cm-editor.cm-focused'),
+                reducedMotion: window.matchMedia(
+                    '(prefers-reduced-motion: reduce)',
+                ).matches,
+                devicePixelRatio: window.devicePixelRatio,
+                cursorLine: (() => {
+                    try {
+                        return view?.editor.getCursor().line;
+                    } catch {
+                        return null;
+                    }
+                })(),
+            };
+        });
+        console.log('CURSORDIAG ' + JSON.stringify(diagnosis));
+    }
     return last;
 }
 
