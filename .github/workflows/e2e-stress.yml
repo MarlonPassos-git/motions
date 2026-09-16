@@ -44,12 +44,9 @@ jobs:
             - id: mk
               run: |
                   n=${{ inputs.parallel }}
-                  printf 'replicas=['
-                  for i in $(seq 1 "$n"); do
-                    [ "$i" -gt 1 ] && printf ','
-                    printf '%s' "$i"
-                  done
-                  printf ']\n'
+                  list=$(seq 1 "$n" | paste -sd, -)
+                  echo "replicas=[$list]" >> "$GITHUB_OUTPUT"
+                  echo "replicas=[$list]"
               shell: bash
 
     stress:
