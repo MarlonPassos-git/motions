@@ -261,9 +261,58 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
         await useSourceProperties();
         await setRpcEnabled(false);
         await waitForRpc(false);
+        // ChromeDriver reports "Timed out receiving message from renderer:
+        // 30.000" and the session dies before any test can report, so the
+        // failing test name is never recorded. A thirty-second silence is a
+        // blocked main thread; this records what ran long enough to cause it.
+        await browser
+            .execute(() => {
+                const w = window as unknown as {
+                    __longTasks?: Array<{ n: string; d: number; t: number }>;
+                    __longTaskObserver?: PerformanceObserver;
+                };
+                w.__longTasks = [];
+                w.__longTaskObserver?.disconnect();
+                const obs = new PerformanceObserver((list) => {
+                    for (const e of list.getEntries()) {
+                        w.__longTasks?.push({
+                            n: e.name,
+                            d: Math.round(e.duration),
+                            t: Math.round(e.startTime),
+                        });
+                    }
+                });
+                obs.observe({ entryTypes: ['longtask'] });
+                w.__longTaskObserver = obs;
+            })
+            .catch(() => {});
     });
 
-    afterEach(async () => {
+    afterEach(async function () {
+        const tasks = await browser
+            .execute(() => {
+                const w = window as unknown as {
+                    __longTasks?: Array<{ n: string; d: number; t: number }>;
+                };
+                const all = w.__longTasks ?? [];
+                return {
+                    count: all.length,
+                    worst: all
+                        .slice()
+                        .sort((a, b) => b.d - a.d)
+                        .slice(0, 3),
+                    totalMs: all.reduce((sum, e) => sum + e.d, 0),
+                };
+            })
+            .catch(() => null);
+        console.log(
+            'RPCTASKS ' +
+                JSON.stringify({
+                    after: (this.currentTest?.title ?? '?').slice(0, 44),
+                    state: this.currentTest?.state,
+                    tasks,
+                }),
+        );
         await setRpcEnabled(false);
         await waitForRpc(false);
         for (const pid of spawnedPids) {

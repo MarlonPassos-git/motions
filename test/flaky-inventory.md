@@ -67,6 +67,16 @@ rather than staying as decoration.
 Closing this properly needs a control that reverts all three parts of
 `34168dd` at once, not one of them.
 
+## Fold and canvas hold in production CI
+
+Two consecutive real runs after the focus fixes, `f5d3502` and `80d4918`:
+zero macOS failures in either, 99 and 98 jobs green. Every CI shard job is a
+cold start, which is the condition that used to break both clusters, so this
+is the case they used to fail rather than a warm rehearsal.
+
+Remaining in production: the Linux RPC entries, and one Windows jumplist
+failure.
+
 ## RPC entries: the connection timeout did not fix them
 
 Six cold Linux samples: four failed. The signature is unchanged --
