@@ -77,6 +77,27 @@ is the case they used to fail rather than a warm rehearsal.
 Remaining in production: the Linux RPC entries, and one Windows jumplist
 failure.
 
+## The RPC cluster is larger than five entries
+
+Applying the focus fix to `rpc-obsidian-bridge` and `rpc-keys` on the strength
+of the fold and canvas results did not help: six cold macOS samples, two
+failures, and a different test each time — `keeps source-rendered frontmatter
+fully navigable` and `forwards the count from 2<C-o> to the host jumplist`.
+`focuses the expected pane in all four directions`, the failure that prompted
+the change, did not recur at all.
+
+That is the signature of the Neovim-exit cause rather than an unfocused
+window: the failing test moves between runs because whichever test is running
+when the child exits is the one that fails. It also means the cluster spans
+`rpc-structural-nav`, `rpc-obsidian-bridge`, `rpc-keys` and `rpc-text-objects`
+rather than the entries originally listed, and that entry names are a poor
+key for it.
+
+The fix was applied from a prior instead of a measurement, which is the
+departure that produced this. The change itself is kept because it aligns the
+two focus paths, which had unequal strength for no reason, but it resolved
+nothing here.
+
 ## RPC entries: Neovim exits, and the renderer then hangs
 
 Six cold Linux samples, three failures, and the Node-side process state names
