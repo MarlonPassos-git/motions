@@ -67,6 +67,23 @@ rather than staying as decoration.
 Closing this properly needs a control that reverts all three parts of
 `34168dd` at once, not one of them.
 
+## Canvas entries: resolved
+
+Focusing the window after the spec's own reload cleared them: eight cold
+macOS starts, eight passes, no skips, `document.hasFocus()` true on every one.
+Against four and five failures in eight before, each failure unfocused.
+
+Placement was what took two attempts. `beforeSuite` runs before the spec calls
+`reloadObsidian`, and the reload discards the focus, so the global wait left
+five of eight still failing. The call has to come after the spec's own load,
+which is what the fold specs were already doing.
+
+|                                    | cold failures | focus on failures           |
+| ---------------------------------- | ------------- | --------------------------- |
+| before                             | 4/8, then 5/8 | `hasFocus` false every time |
+| focus wait in beforeSuite          | 5/8           | false every time            |
+| focus wait after the spec's reload | 0/8           | n/a, all true               |
+
 ## Canvas entries: the same unfocused window
 
 Eight cold macOS starts with the environment reported unconditionally:
