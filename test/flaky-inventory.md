@@ -77,6 +77,35 @@ is the case they used to fail rather than a warm rehearsal.
 Remaining in production: the Linux RPC entries, and one Windows jumplist
 failure.
 
+## RPC entries: narrowed to a native block
+
+`connectionRetryTimeout` did not fix the stall, but it changed a dead session
+with no test name into a clean 180-second abort carrying a stack:
+
+    WebDriverError: The operation was aborted due to timeout on execute/sync
+      at getEditorValue (test/helpers.ts:39)
+      at forkSnapshots (rpc-structural-nav.e2e.ts:161)
+
+Excluded by measurement since:
+
+- **Document size.** 13 to 32 characters at every test boundary up to the
+  failure, so `getValue()` is not walking anything large.
+- **A JavaScript long task.** None is ever reported. That is consistent with
+  being stuck inside one rather than evidence against it, because a
+  `PerformanceObserver` emits a `longtask` entry only once the task finishes —
+  reading it as "not JavaScript" would have sent the next round chasing GC and
+  IPC for nothing.
+- **Neovim being dead.** The child is `alive:S`, sleeping normally, at every
+  boundary that reports.
+
+So the renderer stops answering `execute/sync` for 180 seconds with a trivial
+document and no completed long task. Browser-side instrumentation returns null
+once the session dies, which is precisely when the evidence is wanted, so the
+process state is now read from Node and survives.
+
+Local rate is roughly one run in six against four in six on CI, so CI remains
+the better sampling ground.
+
 ## RPC entries: the connection timeout did not fix them
 
 Six cold Linux samples: four failed. The signature is unchanged --

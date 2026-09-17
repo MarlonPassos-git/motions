@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { browser, expect } from '@wdio/globals';
 import { resolve } from 'node:path';
 import {
@@ -328,12 +329,29 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
                 };
             })
             .catch(() => null);
+        // Everything above runs in the browser and returns null once the
+        // session dies, which is exactly when the evidence is wanted. This
+        // runs in Node and survives. The document is 13-32 characters and no
+        // long task is ever reported, so getValue() is not slow for any
+        // JavaScript reason; the remaining candidate is a native block, and
+        // the Neovim child is the native thing these specs add.
+        const nvim = [...spawnedPids].map((pid) => {
+            let state = 'unknown';
+            try {
+                const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+                state = stat.split(') ')[1]?.split(' ')[0] ?? 'unparsed';
+            } catch {
+                state = 'no-proc';
+            }
+            return `${pid}:${pidIsAlive(pid) ? 'alive' : 'dead'}:${state}`;
+        });
         console.log(
             'RPCTASKS ' +
                 JSON.stringify({
                     after: (this.currentTest?.title ?? '?').slice(0, 44),
                     state: this.currentTest?.state,
                     tasks,
+                    nvim,
                 }),
         );
         await setRpcEnabled(false);
