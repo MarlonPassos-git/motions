@@ -24,6 +24,26 @@ async function consoleHasAsyncError(): Promise<boolean> {
 }
 
 describe('vim.ui', function () {
+    // Reported on every run, passing or failing. Instrumenting only failures
+    // is what kept prefers-reduced-motion alive as a suspect for the canvas
+    // cluster until the passing rows showed it true everywhere. These entries
+    // are focus-adjacent, so measure focus before assuming it.
+    before(async function () {
+        console.log(
+            'UIENV ' +
+                JSON.stringify(
+                    await browser.execute(() => ({
+                        docHasFocus: document.hasFocus(),
+                        cmFocused: !!document.querySelector(
+                            '.cm-editor.cm-focused',
+                        ),
+                        activeEl: `${document.activeElement?.tagName ?? '?'}`,
+                        window: `${window.innerWidth}x${window.innerHeight}`,
+                    })),
+                ),
+        );
+    });
+
     afterEach(async function () {
         await browser.executeObsidian(() => {
             document

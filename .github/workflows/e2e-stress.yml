@@ -136,7 +136,7 @@ jobs:
                     # The per-test traces are the point of the run, so keep them
                     # even when the iteration passed.
                     printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' \
-                      | grep -aoE '(FOLDTRACE|FOLDENV|CURSORENV|CURSORDIAG) \{.*\}' \
+                      | grep -aoE '(FOLDTRACE|FOLDENV|CURSORENV|CURSORDIAG|UIENV) \{.*\}' \
                       | sed "s/^/iter $i /" >> traces.txt || true
                   done
 
