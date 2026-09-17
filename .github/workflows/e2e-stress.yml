@@ -120,6 +120,15 @@ jobs:
                       | while read -r sp; do [ -n "$sp" ] && printf ' --spec %s' "$sp"; done)
                     out=$(npx wdio run ./wdio.conf.mts $SPEC_ARGS 2>&1)
                     rc=$?
+                    # Windows locks files during obsidian-launcher's atomic
+                    # rename, which e2e.yml retries and this did not: three of
+                    # eight replicas died in setup and were counted as though
+                    # the specs had failed.
+                    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'EPERM'; then
+                      sleep 5
+                      out=$(npx wdio run ./wdio.conf.mts $SPEC_ARGS 2>&1)
+                      rc=$?
+                    fi
                     set -e
                     if [ "$rc" -eq 0 ]; then
                       pass=$((pass + 1))

@@ -67,6 +67,34 @@ rather than staying as decoration.
 Closing this properly needs a control that reverts all three parts of
 `34168dd` at once, not one of them.
 
+## RPC entries: the connection timeout did not fix them
+
+Six cold Linux samples: four failed. The signature is unchanged --
+22 `invalid session id` and 2 `Timed out receiving message from renderer:
+30.000`, with no failing test names at all, because the session dies before
+any test reports.
+
+`connectionRetryTimeout` addresses the HTTP client's patience. The 30-second
+limit in the message is ChromeDriver waiting on the renderer, which that
+setting does not govern, so the change could not have helped and the quiet
+runs since it landed were normal CI happening not to sample the case.
+
+A renderer that stops responding for thirty seconds is a main-thread block.
+If it is our main thread it is a user-visible freeze, so this one is not
+dismissible as environment until that is settled.
+
+## UI-lifecycle entries: not reproduced, and three replicas were harness noise
+
+Eight Windows replicas: five ran and all five passed; three died in setup on
+`EPERM`, which `e2e.yml` retries and the stress workflow did not, so they
+looked like spec failures. The retry is now in both.
+
+Focus was reported on every run rather than only on failures. Locally these
+specs show `hasFocus` true with `cm-focused` false and the body as active
+element, which is expected since neither puts a cursor in an editor -- so the
+discriminator that resolved the fold and canvas clusters does not transfer
+here, and applying that fix blind could have passed for the wrong reason.
+
 ## Canvas entries: resolved
 
 Focusing the window after the spec's own reload cleared them: eight cold
