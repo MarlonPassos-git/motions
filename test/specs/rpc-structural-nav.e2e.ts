@@ -295,6 +295,28 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
                     __longTasks?: Array<{ n: string; d: number; t: number }>;
                 };
                 const all = w.__longTasks ?? [];
+                // getEditorValue is where the renderer stops answering, and a
+                // PerformanceObserver never reports a task that has not
+                // finished, so zero long tasks is consistent with being stuck
+                // inside one. getValue() walking an oversized document is the
+                // obvious candidate, so measure the document rather than infer.
+                const view = (
+                    window as unknown as {
+                        app?: {
+                            workspace: {
+                                activeEditor?: {
+                                    editor?: { getValue(): string };
+                                };
+                            };
+                        };
+                    }
+                ).app?.workspace?.activeEditor;
+                let docLength: number | string = 'n/a';
+                try {
+                    docLength = view?.editor?.getValue().length ?? -1;
+                } catch (e) {
+                    docLength = `threw: ${String(e)}`;
+                }
                 return {
                     count: all.length,
                     worst: all
@@ -302,6 +324,7 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
                         .sort((a, b) => b.d - a.d)
                         .slice(0, 3),
                     totalMs: all.reduce((sum, e) => sum + e.d, 0),
+                    docLength,
                 };
             })
             .catch(() => null);
