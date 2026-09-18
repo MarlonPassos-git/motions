@@ -444,6 +444,29 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## After the heading fix
+
+`83bd881` carried the fix and failed three jobs; `871639a` on top of it was
+110/110 green. **No heading motion failed in either** — not `]3`, `]h` or
+`[h` — which is the first evidence the fix holds in CI rather than only under
+the forced empty tree.
+
+The three failures were all known shapes, plus one new entry:
+
+- Linux `"after each"` and `matches backward operator-pending heading motion
+edits`, the latter reporting `unavailable: invalid session id` — the
+  child-exit cluster, where the browser diagnostic cannot run by definition.
+- Windows `uses the host jumplist for two cross-note older jumps` with
+  `cmFocused` true and a 19-character document. That is the second such
+  sample, so focus is excluded for it on repeated measurement rather than one
+  observation.
+- macOS `keeps source-rendered frontmatter fully navigable`, an RPC spec.
+- Linux `vim.plugins.add fetches mini.comment from GitHub`, which fetches over
+  the network during the test. Its diagnostic is unremarkable — focused
+  window, no editor open — so a fetch failure is the likely shape rather than
+  anything in the editor, and it belongs with the installer failures as
+  infrastructure rather than with the rest.
+
 ## The recurring shape: a guard that checks something adjacent
 
 Three defects this session share one form — a check that answers a question
