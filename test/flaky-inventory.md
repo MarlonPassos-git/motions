@@ -444,6 +444,25 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## First eliminations from the forced matrix
+
+`d5ab229` came back 110/110 green, so it offered nothing to diagnose. The
+forced conditions do not need a failure to be useful.
+
+**Focus is excluded for `which-key shows after space press` and `a config
+reload closes an open picker instead of leaking it`.** Blurring the active
+element before the suite left both passing, 12 and 10. They also sit at
+`activeEl BODY` with `cm-focused` false in normal operation, because neither
+puts a cursor in an editor, so they are already unfocused when they pass.
+
+That is two entries and one condition closed in a single local run, with no
+CI involved. Eliminations are permanent: these two never need testing against
+focus again, whatever else they turn out to be.
+
+Remaining for them: cold start, and whatever is not yet on the list. Several
+of the other unidentified entries live in RPC specs, where the child-exit
+cause is the more likely explanation than any of these.
+
 ## Identifying the rest without waiting for CI to fail
 
 Three failure conditions are now known, and each can be applied deliberately
