@@ -45,7 +45,7 @@ skip on that condition explicitly rather than silently vary.
 | `matches the fork for operators, visual selections, registers, and counts` | Windows             | 1                       | Unknown.                                                                                                                                                                                                   |
 | `which-key shows after space press`                                        | Windows             | 1                       | Unknown. Polls 2000 ms for behaviour gated by `operatorshadowtimeout`'s 1000 ms deferral, so the margin is thin by construction.                                                                           |
 | `a config reload closes an open picker instead of leaking it`              | Windows             | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                 |
-| `uses the host jumplist for two cross-note older jumps`                    | Windows             | 1                       | Unknown. New in `2b6bc75`; the only failure in its run.                                                                                                                                                    |
+| `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux      | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                           |
 
 ## What "resolved" means for the two product bugs
 
@@ -444,6 +444,36 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## The global diagnostic classified two entries on its first run
+
+`203ba65` is the commit that added it, and its four failing jobs were nearly
+discarded as superseded. Two carried the payload:
+
+    ]3 should jump to next H3
+      cmFocused true, docHasFocus true, docLength 25,
+      no callout widget, no cursor canvases
+
+    uses the host jumplist for two cross-note older jumps
+      cmFocused true, docHasFocus true, docLength 19
+
+**Focus is excluded for both.** They failed with the editor focused and the
+document correct, so the cause behind the fold and canvas clusters does not
+apply.
+
+For `]3` that settles the classification. The editor is focused, the document
+is the expected 25 characters, and the motion still does not move — already
+known not to be key delivery, since `viaHandleKey` leaves the cursor at line 0
+as well. It is a behavioural defect, and an ordinary one to hit: open a note
+and press `]3`.
+
+The other two failing jobs were the macOS RPC key-delegation hook, which
+reports nothing because the session is gone, and a Windows **Install pinned
+Neovim** step, which never ran a test at all.
+
+So one run classified two entries, confirmed a third as the RPC shape, and
+contained one failure that was not a test failure — none of which needed a
+round trip to interrogate.
+
 ## First eliminations from the forced matrix
 
 `d5ab229` came back 110/110 green, so it offered nothing to diagnose. The
@@ -525,14 +555,14 @@ under.
 
 `2b6bc75` was run twice with no code change between them:
 
-| Run A                                                                   | Run B                                                             |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `"after each" hook — RPC structural navigation` (Linux)                 | —                                                                 |
-| `matches backward operator-pending heading motion edits` (Linux)        | —                                                                 |
-| `zc on callout folds it` (macOS)                                        | —                                                                 |
-| `editor:unfold-all clears all folds including custom` (macOS)           | —                                                                 |
-| `a config reload closes an open picker instead of leaking it` (Windows) | —                                                                 |
-| —                                                                       | `uses the host jumplist for two cross-note older jumps` (Windows) |
+| Run A                                                                   | Run B          |
+| ----------------------------------------------------------------------- | -------------- |
+| `"after each" hook — RPC structural navigation` (Linux)                 | —              |
+| `matches backward operator-pending heading motion edits` (Linux)        | —              |
+| `zc on callout folds it` (macOS)                                        | —              |
+| `editor:unfold-all clears all folds including custom` (macOS)           | —              |
+| `a config reload closes an open picker instead of leaking it` (Windows) | —              |
+| `uses the host jumplist for two cross-note older jumps`                 | Windows, Linux | 2   | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document. |
 
 The sets are disjoint. Whatever selects the failures on a given run, it is not
 the commit, so a single green run says nothing and a single red one identifies
