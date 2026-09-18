@@ -523,6 +523,23 @@ Measured across the five runs containing `34168dd`: the fold pair failed in
 three and the RPC structural-nav pair in three, both matching their pre-fix
 rates. That is the basis for saying the toggle fix did not touch them.
 
+## A red job is not always a failing test
+
+Run `d162ff1` showed three failing macOS jobs. Two of them failed at
+**Install pinned Neovim**, after 0 and 1 minutes, before any test ran; only
+the third reached the suite. Reading the count as three test failures
+overstates the problem by a factor of three.
+
+The failure summary runs after wdio, so a job that dies in setup produces a
+red square with no summary at all, which looks the same at a glance as a test
+failure that reported nothing. Check the failing **step** before the failing
+test: `.steps[] | select(.conclusion=="failure") | .name`, or simply the job
+duration, since a setup failure is over in about a minute.
+
+Worth adding to the reporting: name the failing step in the summary, so
+installer and network failures are separable from test failures without
+opening the job.
+
 ## Shard numbers do not identify specs
 
 `e2e (macos-latest, shard 3)` reported `cursor follows cursor movement`, but
