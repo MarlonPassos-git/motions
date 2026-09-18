@@ -135,11 +135,19 @@ Two failures also reported an empty pid set with no test state at all, which
 means the hook failed before a pid was recorded. Those are a different shape
 from the `dead:no-proc` case and should not be counted with it.
 
-Independently of the cause, the host hanging for 180 seconds instead of
-erroring is a defect of ours. The 30-second request timeout added in
-`ad8e3ac` does not fire when the stream closes, so a user whose Neovim
-crashes gets a frozen editor rather than a message. That is worth fixing on
-its own and does not depend on this question being answered.
+An earlier note here claimed the host fails to notice a dead child and that
+this was a ready-to-fix defect. Reading the code before fixing showed it is
+not: `neovim-connection.ts` registers `child.on('close')`, and `handleClose`
+calls `rpc.dispose(new Error('Neovim process exited'))`, which rejects every
+pending request, then shows a Notice naming the exit code or signal.
+
+The hang is also not an RPC call. `getEditorValue` runs
+`view.editor.getValue()`, which is CM6 only and involves no RPC, so the
+renderer is not waiting on Neovim when it stops answering. What makes the
+renderer unresponsive around the time the child exits is unknown, and
+`spawnSync`-style synchronous work in teardown is the first thing to look
+for, since a synchronous block would produce exactly this shape: no completed
+long task, a trivial document, and `execute/sync` never returning.
 
 ## RPC entries: Neovim exits, and the renderer then hangs
 
