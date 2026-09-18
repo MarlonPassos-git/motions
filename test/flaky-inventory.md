@@ -444,6 +444,34 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## What identifying the RPC cause still needs
+
+The remaining question is why the Neovim child exits, and every channel we
+have dies with the WebDriver session:
+
+| Channel                  | Result                                                  |
+| ------------------------ | ------------------------------------------------------- |
+| browser diagnostic       | `unavailable: invalid session id`                       |
+| Node `/proc`             | `dead:no-proc` — gone, not why                          |
+| `NVIM_LOG_FILE`          | empty; Neovim writes it only for some levels            |
+| the plugin's exit Notice | computed correctly, unreadable once the session is gone |
+
+`neovimBinaryPath` is a plugin setting, so pointing it at a wrapper that
+records the child's exit status needs no product change and survives the
+session. `test/fixtures/nvim-exit-wrapper.sh` does that, and standalone it
+passes arguments through and records the status.
+
+Wiring it into the spec **failed**: 2 failing and 0 passing, with an empty
+exit log, so the wrapper never ran successfully. The likely cause is that
+Obsidian's spawned environment does not carry the PATH the script assumed, so
+the bare `nvim` resolved to nothing. The wiring was reverted -- the spec is
+back to 14 passing -- and the wrapper now resolves the binary explicitly
+before falling back to the bare name.
+
+Next attempt should confirm the wrapper runs at all before trusting a run:
+assert the exit log is non-empty after a single connect, rather than
+inferring from the absence of failures.
+
 ## After the heading fix
 
 `83bd881` carried the fix and failed three jobs; `871639a` on top of it was
