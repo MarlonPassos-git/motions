@@ -444,6 +444,36 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## Identifying the rest without waiting for CI to fail
+
+Three failure conditions are now known, and each can be applied deliberately
+instead of sampled:
+
+| Condition          | How to force it                         |
+| ------------------ | --------------------------------------- |
+| editor not focused | blur the active element                 |
+| cold start         | one iteration per job, several replicas |
+| Neovim child gone  | kill the tracked pid mid-test           |
+
+The first is demonstrated. Blurring `document.activeElement` put the callout
+back into `.cm-embed-block.cm-callout` immediately, locally, on the first
+attempt:
+
+    focusedBefore True  widgetBefore False
+    focusedAfter  True  widgetAfter  True
+
+Note `document.hasFocus()` stayed true throughout. The discriminator is
+CodeMirror focus rather than window focus; the window mattered only as a
+precondition for it, and blurring the element reaches the same state directly.
+That also makes the condition reproducible on a developer machine, which the
+window-level version was not.
+
+So the remaining entries do not need CI to fail by chance. Run each suspect
+spec under each forced condition: whatever fails is identified, and whatever
+survives all three is genuinely something else and can be separated from the
+pile. That converts an open-ended wait into a finite matrix of
+specs x conditions.
+
 ## Do the entries share a cause?
 
 Two structural factors were checked and neither discriminates:
