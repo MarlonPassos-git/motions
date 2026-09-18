@@ -30,6 +30,12 @@ on:
                     - windows-latest
                     - ubuntu-latest
 
+# Neovim writes stdpath('log') only for some levels and the child does not
+# resolve the runner's HOME the way a shell would, so a crash left nothing
+# readable. Obsidian inherits this and spawns the child, so it propagates.
+env:
+    NVIM_LOG_FILE: /tmp/nvim-debug.log
+
 jobs:
     # Only the first iteration of a job is a cold start, and a cold start is
     # what fails: across six runs every failure was iteration 1, and iteration 1
@@ -157,6 +163,14 @@ jobs:
                     echo "| pass | $pass |"
                     echo "| fail | $fail |"
                     echo
+                    if [ -s /tmp/nvim-debug.log ]; then
+                      echo '<details><summary>Neovim log tail</summary>'
+                      echo
+                      echo '```'
+                      tail -40 /tmp/nvim-debug.log
+                      echo '```'
+                      echo '</details>'
+                    fi
                     if [ -s failing-tests.txt ]; then
                       echo '<details><summary>Failing tests</summary>'
                       echo
