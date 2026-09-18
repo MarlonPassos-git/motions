@@ -14,6 +14,7 @@ vi.mock('../../src/ui/hint-mode', () => ({
 
 import { GlobalKeyHandler } from '../../src/workspace/global-key-handler';
 import { GlobalMappingRegistry } from '../../src/workspace/global-mapping-registry';
+import { observeKeys } from '../../src/workspace/key-observer';
 import { executeCommand } from '../../src/workspace/navigation';
 
 type KeydownListener = (e: Partial<KeyboardEvent>) => void;
@@ -159,6 +160,21 @@ describe('GlobalKeyHandler', () => {
                     cancelable: true,
                 },
             });
+        });
+
+        it('does not report the translated arrow as a physical key', () => {
+            activeViewType = 'file-explorer';
+            const observedKeys: string[] = [];
+            const stopObserving = observeKeys((key) => observedKeys.push(key));
+            const dispatchEvent = vi.fn((event: Partial<KeyboardEvent>) => {
+                capturedListener!(event);
+                return true;
+            });
+
+            pressKey('j', { target: { dispatchEvent } });
+            stopObserving();
+
+            expect(observedKeys).toEqual(['j']);
         });
 
         const blockedContexts: Array<
