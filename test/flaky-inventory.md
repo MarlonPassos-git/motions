@@ -463,16 +463,23 @@ between runs rather than repeating. So no consistent subset of tests is at
 fault; what the hooks share is `setRpcEnabled` and `waitForRpc` — starting and
 stopping Neovim.
 
-Isolating that cycle does **not** reproduce it. Twelve connect/disconnect
-cycles with no tests in between settled every time, `UD` twelve times over,
-with twelve `rc=0` exits. Locally the full spec is only about one run in six,
-so twelve clean cycles is suggestive rather than exonerating, but the cycle
-alone is not obviously fragile.
+**The cycle alone is exonerated.** Six cold Linux replicas ran twelve
+connect/disconnect cycles each — 72 in total, on the platform where the full
+spec fails about four runs in six — and every one settled:
 
-What the real hooks add is `loadSingleFileWorkspace` and
-`useSourceProperties`, with editor work between cycles. Running the isolated
-cycle on CI, where the full spec fails about four runs in six, would separate
-the cycle from its surroundings much more sharply than a local run can.
+    {"cycles":"UD UD UD UD UD UD UD UD UD UD UD UD","completed":12,"settled":true}
+
+repeated for all six replicas. If the cycle carried the failure probability,
+72 of them would not come back clean.
+
+So starting and stopping Neovim is not fragile in itself. The cause is an
+interaction with what the real hooks put around it:
+`loadSingleFileWorkspace`, `useSourceProperties`, and editor work between
+cycles.
+
+That is a bisect rather than a search. Add one element back at a time — the
+workspace load first, since it is the heaviest and touches the same editor the
+stall appears in — and the first variant that fails names the interaction.
 
 ## Neovim is not crashing, and the exit may be incidental
 
