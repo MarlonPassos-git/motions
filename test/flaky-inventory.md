@@ -444,6 +444,39 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## Neovim is not crashing, and the exit may be incidental
+
+The wrapper answered on its first failing run:
+
+    RPCTASKS {"after":"matches navigation across nested list items",
+              "tasks":null,"nvim":[],"nvimLog":"",
+              "nvimExit":"21:30:33 pid=3486 rc=0"}
+
+`rc=0`. Not 139 for SIGSEGV, not 137 for a kill, not an error code. **Neovim
+is not crashing**, so a crash in the companion Lua, a fatal signal and the OOM
+killer are all excluded.
+
+That also undermines the causal story recorded earlier. `rc=0` is exactly what
+a healthy disconnect produces — passing runs record the same — and
+`beforeEach` calls `setRpcEnabled(false)`, which shuts Neovim down on purpose.
+So the earlier claim that the child exits and the renderer hang follows from it
+is **not supported**: a clean exit at a teardown boundary is indistinguishable
+from the teardown itself, and `dead:no-proc` was consistent with normal
+shutdown all along.
+
+What remains is the original question in its earlier form: why does the
+renderer stop answering `execute/sync`? Known about it:
+
+- no completed long task, which is consistent with being stuck inside one
+- a trivial document, 13 to 32 characters
+- no RPC request pending, since `getEditorValue` is CM6 only
+- Neovim exiting cleanly rather than dying
+
+The next measurement should establish whether the exit precedes the stall or
+follows it, because the current data cannot order them. A timestamp on the
+renderer's last successful call, compared against the wrapper's exit line,
+would do it.
+
 ## What identifying the RPC cause still needs
 
 The remaining question is why the Neovim child exits, and every channel we
