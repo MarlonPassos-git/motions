@@ -12,6 +12,8 @@ export default defineConfig(
         'dist',
         '.obsidian-cache',
         '.sisyphus',
+        '.omo',
+        '.omc',
         'esbuild.config.mjs',
         'version-bump.mjs',
         'scripts/report-latency.mjs',
