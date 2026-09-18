@@ -461,16 +461,23 @@ records the child's exit status needs no product change and survives the
 session. `test/fixtures/nvim-exit-wrapper.sh` does that, and standalone it
 passes arguments through and records the status.
 
-Wiring it into the spec **failed**: 2 failing and 0 passing, with an empty
-exit log, so the wrapper never ran successfully. The likely cause is that
-Obsidian's spawned environment does not carry the PATH the script assumed, so
-the bare `nvim` resolved to nothing. The wiring was reverted -- the spec is
-back to 14 passing -- and the wrapper now resolves the binary explicitly
-before falling back to the bare name.
+The first wiring attempt failed with 2 failing, 0 passing and an empty exit
+log. The PATH theory offered for it was wrong; capturing the error named the
+real cause in one run:
 
-Next attempt should confirm the wrapper runs at all before trusting a run:
-assert the exit log is non-empty after a single connect, rather than
-inferring from the absence of failures.
+    javascript error: resolvePath is not defined
+
+`resolvePath` had been called inside the `executeObsidian` callback, which
+runs in the browser where `node:path` does not exist. The path is now resolved
+in Node and passed as an argument.
+
+It works: the spec stays at 14 passing and the exit log fills with `rc=0`
+entries, so the wrapper is genuinely running rather than silently absent. A
+healthy disconnect is a clean exit; a signalled child reads as 128+signal, so
+a crash and an orderly quit are distinguishable from that one number.
+
+Confirming the instrument ran, rather than inferring it from the absence of
+failures, is what separated this attempt from the last one.
 
 ## After the heading fix
 

@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { browser, expect } from '@wdio/globals';
 import { resolve } from 'node:path';
 import {
@@ -41,6 +42,16 @@ interface ParityCase {
 
 const TEST_CONFIG_PATH = resolve('test/fixtures/nvim/init.lua');
 const spawnedPids = new Set<number>();
+
+function nvimExitLogSize(): number {
+    try {
+        return statSync(NVIM_EXIT_LOG).size;
+    } catch {
+        return 0;
+    }
+}
+
+let nvimExitOffset = 0;
 
 function nvimLogPath(): string | undefined {
     for (const candidate of [
@@ -92,9 +103,25 @@ async function getRpcState(): Promise<RpcState> {
     });
 }
 
+// Resolved in Node: the callback below runs in the browser, where node:path
+// does not exist. Wiring this inline produced "resolvePath is not defined".
+// The wrapper records how Neovim exited, which no channel inside the session
+// survives to report.
+const NVIM_EXIT_LOG = '/tmp/nvim-exit.log';
+const NVIM_WRAPPER =
+    process.platform === 'win32'
+        ? ''
+        : resolvePath('test/fixtures/nvim-exit-wrapper.sh');
+
 async function setRpcEnabled(enabled: boolean, textwidth = 80): Promise<void> {
     await browser.executeObsidian(
-        async ({ app }, next: boolean, configPath: string, width: number) => {
+        async (
+            { app },
+            next: boolean,
+            configPath: string,
+            width: number,
+            binaryPath: string,
+        ) => {
             const plugin = (
                 app as unknown as {
                     plugins: { plugins: Record<string, RpcPlugin> };
@@ -104,7 +131,7 @@ async function setRpcEnabled(enabled: boolean, textwidth = 80): Promise<void> {
             Object.assign(plugin.settings, {
                 enableHardWrap: true,
                 enableNavigation: true,
-                neovimBinaryPath: '',
+                neovimBinaryPath: binaryPath,
                 neovimConfigPath: configPath,
                 neovimRpcEnabled: next,
                 textwidth: width,
@@ -127,6 +154,7 @@ async function setRpcEnabled(enabled: boolean, textwidth = 80): Promise<void> {
         enabled,
         TEST_CONFIG_PATH,
         textwidth,
+        NVIM_WRAPPER,
     );
 }
 
@@ -296,6 +324,7 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
         // where this test starts so afterEach reads only its own bytes rather
         // than whatever an earlier test happened to write last.
         nvimLogOffset = nvimLogSize();
+        nvimExitOffset = nvimExitLogSize();
         // ChromeDriver reports "Timed out receiving message from renderer:
         // 30.000" and the session dies before any test can report, so the
         // failing test name is never recorded. A thirty-second silence is a
@@ -409,6 +438,19 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
                     tasks,
                     nvim,
                     nvimLog,
+                    // Healthy runs record rc=0. A signalled child reads as
+                    // 128+signal, so a crash and an orderly quit are
+                    // distinguishable from this one number.
+                    nvimExit: (() => {
+                        try {
+                            return readFileSync(NVIM_EXIT_LOG, 'utf8')
+                                .slice(nvimExitOffset)
+                                .trim()
+                                .slice(-200);
+                        } catch {
+                            return '';
+                        }
+                    })(),
                 }),
         );
         await setRpcEnabled(false);
