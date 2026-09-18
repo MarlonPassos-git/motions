@@ -444,6 +444,36 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## The RPC failures are concentrated in setup and teardown
+
+Across seven runs, every RPC-related failure:
+
+| Failure                                                  | Count | Kind |
+| -------------------------------------------------------- | ----- | ---- |
+| `"after each"` — structural navigation                   | 3     | hook |
+| `"before each"` — structural navigation                  | 1     | hook |
+| `"after each"` — text synchronisation                    | 1     | hook |
+| `"after each"` — key delegation                          | 1     | hook |
+| `matches backward operator-pending heading motion edits` | 2     | test |
+| `keeps source-rendered frontmatter fully navigable`      | 1     | test |
+| `uses the host jumplist for two cross-note older jumps`  | 2     | test |
+
+**Half are hooks, across three different specs**, and the failing tests vary
+between runs rather than repeating. So no consistent subset of tests is at
+fault; what the hooks share is `setRpcEnabled` and `waitForRpc` — starting and
+stopping Neovim.
+
+Isolating that cycle does **not** reproduce it. Twelve connect/disconnect
+cycles with no tests in between settled every time, `UD` twelve times over,
+with twelve `rc=0` exits. Locally the full spec is only about one run in six,
+so twelve clean cycles is suggestive rather than exonerating, but the cycle
+alone is not obviously fragile.
+
+What the real hooks add is `loadSingleFileWorkspace` and
+`useSourceProperties`, with editor work between cycles. Running the isolated
+cycle on CI, where the full spec fails about four runs in six, would separate
+the cycle from its surroundings much more sharply than a local run can.
+
 ## Neovim is not crashing, and the exit may be incidental
 
 The wrapper answered on its first failing run:
