@@ -444,6 +444,40 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## The recurring shape: a guard that checks something adjacent
+
+Three defects this session share one form — a check that answers a question
+_near_ the one the code depends on:
+
+| Where                              | Checked                            | Needed                                |
+| ---------------------------------- | ---------------------------------- | ------------------------------------- |
+| `waitUntilFoldable`                | `foldable()`, a state query        | the region rendered as editable lines |
+| `isTreeAvailable` in `headings.ts` | a tree exists                      | the tree yields headings              |
+| `callout fold placeholder…`        | an `if` guard around the assertion | the assertion running at all          |
+
+Each passed while the thing it protected was broken, which is why all three
+survived so long.
+
+**Audited the treesitter consumers for the same shape.** Only headings had it.
+The other four decide on the _result_ rather than the predicate and are
+correct as written:
+
+| File                         | Shape                                                  |
+| ---------------------------- | ------------------------------------------------------ |
+| `text-objects/code-block.ts` | `treesitterCodeBlock(...) ?? findContainingBlock(...)` |
+| `text-objects/blockquote.ts` | `treesitterBlockquoteRange(...) ?? …`                  |
+| `text-objects/delimiter.ts`  | `if (tsRange) return …;` then the regex path           |
+| `snippets/context.ts`        | `if (tsResult) return tsResult;` then the regex path   |
+
+A wider scan for readiness-style predicates gating behaviour found only
+`isEnabled() || isInsertMode()` in `snippets/tab-expand.ts`, which is a
+feature gate rather than a fallback decision.
+
+So the product side is clean apart from the one fixed. The shape recurs mostly
+in **test** code, where a wait or a guard stands in for the real
+precondition — worth suspecting first whenever a test passes in a state that
+should have broken it.
+
 ## `]3`: resolved, and it was every heading motion
 
 `isTreeAvailable(view)` answers whether a tree exists, not whether it yields
