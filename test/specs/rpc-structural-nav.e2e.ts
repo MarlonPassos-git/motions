@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { browser, expect } from '@wdio/globals';
 import { resolve } from 'node:path';
 import {
@@ -41,6 +41,35 @@ interface ParityCase {
 
 const TEST_CONFIG_PATH = resolve('test/fixtures/nvim/init.lua');
 const spawnedPids = new Set<number>();
+
+function nvimLogPath(): string | undefined {
+    for (const candidate of [
+        process.env.NVIM_LOG_FILE,
+        `${process.env.HOME ?? ''}/.local/state/nvim/log`,
+        `${process.env.HOME ?? ''}/.cache/nvim/log`,
+    ]) {
+        if (!candidate) continue;
+        try {
+            statSync(candidate);
+            return candidate;
+        } catch {
+            /* try the next location */
+        }
+    }
+    return undefined;
+}
+
+function nvimLogSize(): number {
+    const path = nvimLogPath();
+    if (!path) return 0;
+    try {
+        return statSync(path).size;
+    } catch {
+        return 0;
+    }
+}
+
+let nvimLogOffset = 0;
 
 function pidIsAlive(pid: number): boolean {
     try {
@@ -262,6 +291,11 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
         await useSourceProperties();
         await setRpcEnabled(false);
         await waitForRpc(false);
+        // NVIM_LOG_FILE is one path per runner, and this spec starts a fresh
+        // Neovim for every test, so the file accumulates all of them. Record
+        // where this test starts so afterEach reads only its own bytes rather
+        // than whatever an earlier test happened to write last.
+        nvimLogOffset = nvimLogSize();
         // ChromeDriver reports "Timed out receiving message from renderer:
         // 30.000" and the session dies before any test can report, so the
         // failing test name is never recorded. A thirty-second silence is a
@@ -346,18 +380,14 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
         let nvimLog = '';
         const anyDead = [...spawnedPids].some((pid) => !pidIsAlive(pid));
         if (anyDead || this.currentTest?.state !== 'passed') {
-            for (const candidate of [
-                process.env.NVIM_LOG_FILE,
-                `${process.env.HOME ?? ''}/.local/state/nvim/log`,
-                `${process.env.HOME ?? ''}/.cache/nvim/log`,
-            ]) {
-                if (!candidate) continue;
+            const path = nvimLogPath();
+            if (path) {
                 try {
-                    const text = readFileSync(candidate, 'utf8');
-                    nvimLog = text.slice(-600);
-                    break;
+                    nvimLog = readFileSync(path, 'utf8')
+                        .slice(nvimLogOffset)
+                        .slice(-600);
                 } catch {
-                    /* try the next location */
+                    /* absent when Neovim logged nothing */
                 }
             }
         }

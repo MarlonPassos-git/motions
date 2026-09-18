@@ -250,6 +250,16 @@ export const config: WebdriverIO.Config = {
                         ).matches,
                         docLength,
                         window: `${window.innerWidth}x${window.innerHeight}`,
+                        // handleClose already formats the child's exit code or
+                        // signal into a Notice, and NVIM_LOG_FILE stayed empty
+                        // in a local reproduction because Neovim writes that
+                        // log only for some levels. The Notice is the reason
+                        // the plugin itself derived, so read that.
+                        notices: Array.from(
+                            document.querySelectorAll('.notice'),
+                        )
+                            .map((n) => (n.textContent ?? '').slice(0, 120))
+                            .slice(0, 4),
                     };
                 });
                 console.log(

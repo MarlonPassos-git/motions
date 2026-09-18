@@ -523,6 +523,33 @@ Measured across the five runs containing `34168dd`: the fold pair failed in
 three and the RPC structural-nav pair in three, both matching their pre-fix
 rates. That is the basis for saying the toggle fix did not touch them.
 
+## What each diagnostic can and cannot see
+
+`NVIM_LOG_FILE` is one path per runner, so it is isolated across shards but
+shared by every test inside a job, and this spec starts a fresh Neovim per
+test. Reading the tail would therefore attribute an earlier test's bytes to
+the failure; `afterEach` records the file offset at the start of each test and
+reads only the delta.
+
+It may still yield nothing. A local reproduction with the variable set left
+the file at zero bytes, because Neovim writes that log only for some levels,
+so a crash need not appear in it at all.
+
+The plugin already derives the exit reason itself: `handleClose` formats the
+code or signal into a Notice. The global `afterTest` diagnostic reads visible
+Notices for that reason.
+
+But the browser-side diagnostic cannot run at all when the session has died,
+which is exactly the RPC failure mode: it reports `unavailable` and nothing
+else. The division is therefore:
+
+| Failure shape                       | What sees it                                          |
+| ----------------------------------- | ----------------------------------------------------- |
+| session survives (fold, canvas, UI) | `afterTest` FAILDIAG, including Notices               |
+| session dies (RPC)                  | Node-side `RPCTASKS`: `/proc` state and the log delta |
+
+Neither alone covers both, which is why both exist.
+
 ## A red job is not always a failing test
 
 Run `d162ff1` showed three failing macOS jobs. Two of them failed at
