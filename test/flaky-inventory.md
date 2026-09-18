@@ -119,6 +119,28 @@ departure that produced this. The change itself is kept because it aligns the
 two focus paths, which had unequal strength for no reason, but it resolved
 nothing here.
 
+## Why Neovim exits: still open, and how to get at it
+
+Six more cold Linux samples, four failures, `dead:no-proc` confirmed again.
+Reading Neovim's own log from the default locations returned nothing: Neovim
+writes `stdpath('log')` only for some levels, and the spawned child does not
+necessarily resolve the paths guessed from the runner's `HOME`.
+
+The reliable version is to set `NVIM_LOG_FILE` to a known path in the
+workflow environment. Obsidian inherits the runner environment and the plugin
+spawns the child from Obsidian, so the setting propagates, and the file is
+then readable from Node after the session dies.
+
+Two failures also reported an empty pid set with no test state at all, which
+means the hook failed before a pid was recorded. Those are a different shape
+from the `dead:no-proc` case and should not be counted with it.
+
+Independently of the cause, the host hanging for 180 seconds instead of
+erroring is a defect of ours. The 30-second request timeout added in
+`ad8e3ac` does not fire when the stream closes, so a user whose Neovim
+crashes gets a frozen editor rather than a message. That is worth fixing on
+its own and does not depend on this question being answered.
+
 ## RPC entries: Neovim exits, and the renderer then hangs
 
 Six cold Linux samples, three failures, and the Node-side process state names
