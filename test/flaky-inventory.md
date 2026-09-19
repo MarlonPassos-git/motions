@@ -521,6 +521,47 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### The crash requires RPC, and it is the data path
+
+The control that should have been run first. Six `vim-builtin` specs, no RPC,
+two runs at a duration comparable to one `rpc-structural-nav` run:
+
+```
+run 1 -> 4, 17, 10, 51, 5, 21 passing | segfaults: 0
+run 2 -> 4, 17, 10, 51, 5, 21 passing | segfaults: 0
+```
+
+108 tests per run, zero failures, **zero segfaults**, against roughly 50-70% of
+RPC runs segfaulting. So the crash **requires RPC**. Obsidian itself, V8 in
+general, CodeMirror, the vim fork and tree-sitter are all exonerated by this one
+measurement -- they are exercised just as hard by the control.
+
+Narrowing once more with a result already in this file: `rpc-connect-cycle` ran
+432 connect/disconnect cycles across four variants and two platforms without a
+single failure, and it is the RPC spec that moves almost no data. The specs that
+crash are the ones with heavy msgpack traffic. So it is the **data path**, not
+the connection lifecycle.
+
+That matters because the RPC data path is the only place this plugin runs Node
+code inside the renderer: `child_process` stdio streams, socket reads, and
+`Uint8Array` views over pooled Node buffers, decoded partly by native
+`TextDecoder`. A stale or detached view over a backing store produces exactly
+the `base + garbage_u32` fault recorded above, and JavaScript alone cannot
+produce it.
+
+`msgpack-rpc.ts` reads carefully on inspection -- `concatBytes` copies,
+`slice()` copies, and `DataView` is constructed with the view's own
+`byteOffset`/`byteLength` -- so inspection is not enough and the next step is
+measurement, not more reading.
+
+Next bisect, in order of suspicion, each an A/B at ~3 minutes a run:
+
+1. **msgpack decode**: copy every incoming chunk at the socket boundary before
+   it reaches the decoder, so no view over a pooled Node buffer survives an
+   event turn.
+2. **document-sync**: the byte/UTF-16 mapping and line events.
+3. **decorations/extmarks**: the redraw-time CM6 dispatch.
+
 ### The cores: a -1 used as an unsigned 32-bit offset
 
 Two cores were extracted with `coredumpctl dump` and read in a container with
