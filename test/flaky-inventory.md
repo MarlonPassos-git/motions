@@ -449,11 +449,12 @@ Fold works on all three runners, so no graphics explanation applies to it.
 Each variant is six cold Linux replicas at twelve cycles, so 72 cycles per row,
 on the platform where the full spec fails about four runs in six.
 
-| Variant            | Adds                                | Result        |
-| ------------------ | ----------------------------------- | ------------- |
-| `bare`             | nothing                             | 72/72 settled |
-| `workspace`        | `loadSingleFileWorkspace` per cycle | 72/72 settled |
-| `workspace+source` | …plus `useSourceProperties`         | 72/72 settled |
+| Variant            | Adds                                                | Result                                      |
+| ------------------ | --------------------------------------------------- | ------------------------------------------- |
+| `bare`             | nothing                                             | 72/72 settled                               |
+| `workspace`        | `loadSingleFileWorkspace` per cycle                 | 72/72 settled                               |
+| `workspace+source` | …plus `useSourceProperties`                         | 72/72 settled (Linux), 6/6 replicas (macOS) |
+| `editor`           | …plus `setupEditor`, cursor moves, `getEditorValue` | pending, both platforms                     |
 
 216 cycles on Linux without a single failure. None of the three reproduces it,
 so the only untested difference left is the editor work the real tests do
