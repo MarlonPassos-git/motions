@@ -16,6 +16,37 @@ The feature bridge generates Neovim mappings and user commands from the plugin's
 
 M5 structural motions and Markdown text objects are Class A′ buffer-text behavior and do not cross the Obsidian feature bridge. The bundled companion installs buffer-local mappings backed by Neovim's bundled `markdown` and `markdown_inline` treesitter parsers and removes them during companion teardown. M5b covers emphasis, inline code, math, strikethrough, links and wikilinks, fenced code blocks, nested blockquotes, callouts, HTML tags, table cells, and table rows in operator-pending and visual modes. Operators execute over an explicit bounded visual range rather than a cursor-moving callback. Neovim's native `it`/`at` supplies tag matching, with the count consumed once to match the fork's custom object. Highlight (`i=`/`a=`) remains unavailable under RPC because Neovim's bundled Markdown grammar does not expose `==...==` as a syntax node; the companion does not fake a treesitter range with delimiter scanning. The mirrored buffer receives the plugin's `textwidth`; native `gq` and `gw` use Neovim's stock Markdown ftplugin rather than a ported wrapping implementation.
 
+### Intermittent renderer crash when disconnecting the RPC backend
+
+Disabling the Neovim backend can crash Obsidian's renderer process. It is a
+native SIGSEGV — a read of an unmapped page through what looks like a corrupted
+V8 compressed pointer — so it appears as Obsidian's window disappearing or
+reloading, with no JavaScript error.
+
+It requires RPC traffic **and** a disconnect in the same session. Measured in a
+Linux CI container: 216 tests with the backend off produced none, 432
+traffic-free connect/disconnect cycles produced none, and 2,400 requests without
+a disconnect produced none, while a spec performing 14 connect-traffic-disconnect
+cycles crashed 24 of 46 runs. Stubbing the extmark, float, buffer-line, and
+cursor handlers did not change the rate, so it is not caused by processing
+Neovim's output.
+
+Removing the synchronous `qa!`-and-wait from teardown reduces it about threefold
+(7 of 38 runs versus 24 of 46, Fisher p = 0.002) and is shipped, but a residual
+path remains: retaining the child process indefinitely still crashed 3 of 8 runs.
+Memory, JS heap growth, DOM growth, tree-sitter WASM handle lifetime, msgpack
+recursion depth, Electron version, and every container security and namespace
+setting are all excluded by measurement.
+
+Electron's own guidance is that a renderer should not own a crash-prone child
+process — `UtilityProcess` exists for exactly this, and spawning subprocesses is
+documented as work to delegate to the main process. An Obsidian plugin has no
+access to either, so the backend must spawn Neovim from the renderer.
+
+Practical impact: a normal session connects once, so exposure is roughly one
+disconnect. Toggling the backend repeatedly within a session raises the risk.
+Enabling the backend is opt-in and desktop-only.
+
 ### ~~Neovim popup-menu completion is not displayed in RPC mode~~ (Fixed)
 
 The attached UI requests `ext_messages`, `ext_cmdline`, and `ext_popupmenu`. M8a routes messages, M8b renders the external command line, and M8c renders popup-menu items, selection updates, and teardown. `grid=-1` completion is anchored to the command line with byte-position conversion; insert completion uses reported grid cells and CM6 metrics. Grid drawing events remain intentionally discarded.
