@@ -444,6 +444,38 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## No container setting explains it, and privileged was luck
+
+Seven axes, one run each unless noted, against a baseline that fails roughly
+seven times in ten:
+
+| Axis                                          | Result                   |
+| --------------------------------------------- | ------------------------ |
+| baseline `--cpus=4 --memory=8g --shm-size=2g` | fail                     |
+| `--security-opt seccomp=unconfined`           | fail                     |
+| `--ipc=host`                                  | fail                     |
+| `--privileged`                                | 1 clean, then **2 fail** |
+| `--cap-add=SYS_ADMIN`                         | fail                     |
+| `--security-opt apparmor=unconfined`          | fail                     |
+| no cpu or memory limits                       | fail                     |
+
+The single clean `--privileged` run looked like the answer and was not. At a
+baseline failure rate near 70%, one clean run is a coin toss; the two
+confirmation runs settled it. The same mistake as concluding "memory" from one
+4 GiB failure and one 8 GiB pass an hour earlier — a reminder that the
+confirmation run is not optional when the base rate is this high.
+
+So the container is not reproducing the bug _through_ any setting. It is
+reproducing it because it is a different and slower execution environment, and
+the bug is timing-sensitive. Capabilities, seccomp, apparmor, IPC namespace,
+`/dev/shm` and cgroup limits are all eliminated.
+
+What the container gives is the thing that was missing for the whole
+investigation: a five-minute reproduction at roughly 70%. The mechanism is
+still unidentified, and the next step is to use that loop for timing
+instrumentation inside a failing run rather than for more environment
+permutations, which have now been exhausted.
+
 ## Reproduced locally in a resource-constrained container
 
 Running the real spec inside the CI image with `--cpus=2 --memory=4g`
