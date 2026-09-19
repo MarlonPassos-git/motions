@@ -521,6 +521,51 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### The teardown bisect: what moves the rate and what does not
+
+Every arm is `rpc-structural-nav` in the container, counting runs that produced
+a fresh `dmesg` segfault. The spec does 14 connect-traffic-disconnect cycles per
+run.
+
+| arm        | change                                    | segfault runs |
+| ---------- | ----------------------------------------- | ------------- |
+| baseline   | none                                      | 24/46 (52%)   |
+| B          | extmark + float handlers stubbed entirely | 5/8           |
+| C          | buffer-line + cursor handlers stubbed     | 4/8           |
+| D          | RPC reader detached before `qa!`          | 4/8           |
+| G          | `qa!` sent, `'close'` not awaited         | 4/6           |
+| L          | child retained alive, never killed        | 3/8           |
+| F          | `SIGKILL` suppressed, `qa!` + wait kept   | 2/6           |
+| H          | all child listeners removed, no wait      | 2/6           |
+| I          | read pipe destroyed before exit           | 1/8           |
+| E          | no `qa!`, no wait, no kill                | 0/6           |
+| K          | detach, defer `SIGTERM`/`SIGKILL` by 3 s  | 0/8           |
+| production | same as K, written properly               | 2/8           |
+
+Two things to read carefully here. Stubbing our own inbound handlers -- B, C and
+D -- moves nothing, so the fault is not in what we do with the data. And no
+single arm eliminates it: K's 0/8 and the production code's 2/8 are the same
+code, so K was partly luck, which is the standing hazard of 6-to-8 sample arms
+against a 52% base rate.
+
+Grouped, the signal is real. Arms that drop the synchronous quit-and-wait --
+E, K, production and the 600 s-deferral variant -- total **7/38 (18%)** against
+**24/46 (52%)** for the rest, Fisher p = 0.002. So removing it is worth roughly
+a 3x reduction and is kept. It is a **mitigation, not a cure**.
+
+The residual matters. Deferring the kill by 600 s still gave 2/8, and once
+`resetState()` drops the last reference Node can GC the stdio streams and close
+the pipes, so `nvim --embed` exits on channel close at an unpredictable moment
+anyway. Retaining the child forever (L) still gave 3/8. So "the child dies" is
+not a sufficient description of the residual path.
+
+What is established: a renderer SIGSEGV on a corrupted V8 compressed pointer,
+requiring RPC traffic plus disconnect cycling, not caused by our message
+handling, and only partly attributable to how the child is shut down. The next
+question is whether owning a piped child process inside an Electron **renderer**
+is supportable at all, which is a question about upstream rather than about this
+repository.
+
 ### The crash requires RPC, and it is the data path
 
 The control that should have been run first. Six `vim-builtin` specs, no RPC,

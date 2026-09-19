@@ -59,6 +59,8 @@ type ChildProcessHandle = {
         listener: (code: number | null, signal: string | null) => void,
     ): void;
     kill(signal?: string | number): boolean;
+    removeAllListeners(): void;
+    unref(): void;
 };
 
 type ChildProcessModule = {
@@ -85,8 +87,9 @@ export interface NeovimConnectionState {
 const REQUIRED_API_LEVEL = 12;
 const REQUIRED_VERSION = '0.12';
 const CONNECT_TIMEOUT_MS = 10_000;
-const GRACEFUL_EXIT_TIMEOUT_MS = 2_000;
-const ABANDONED_EXIT_TIMEOUT_MS = 2_000;
+const SIGKILL_ESCALATION_MS = 2_000;
+// Measured, not chosen for taste. See scheduleChildShutdown.
+const DEFERRED_SHUTDOWN_DELAY_MS = 3_000;
 
 let childProcessCache: ChildProcessModule | null = null;
 
@@ -476,40 +479,48 @@ export class NeovimConnection {
             return;
         }
 
-        try {
-            rpc.notify('nvim_command', ['qa!']);
-        } catch (error) {
-            console.warn(
-                'Vim Motions: Neovim graceful shutdown failed:',
-                error,
-            );
-        }
+        child.removeAllListeners();
+        child.unref();
+        this.scheduleChildShutdown(child);
 
-        await new Promise<void>((resolve) => {
-            let forceTimer = 0;
-            let abandonTimer = 0;
-            const settle = (): void => {
-                if (forceTimer) window.clearTimeout(forceTimer);
-                if (abandonTimer) window.clearTimeout(abandonTimer);
-                child.removeListener('close', settle);
-                resolve();
-            };
-            child.once('close', settle);
-            forceTimer = window.setTimeout(() => {
-                if (child.exitCode === null && child.signalCode === null)
-                    child.kill('SIGKILL');
-                // SIGKILL ends the process, but 'close' waits for every write
-                // end of the inherited stdio, and a surviving descendant can
-                // hold those open indefinitely. Without this, the only path
-                // out of here is an event that may never arrive.
-                abandonTimer = window.setTimeout(
-                    settle,
-                    ABANDONED_EXIT_TIMEOUT_MS,
-                );
-            }, GRACEFUL_EXIT_TIMEOUT_MS);
-        });
         rpc.dispose();
         if (this.child === child) this.resetState();
+    }
+
+    /**
+     * Ends the child on a later turn instead of inside this teardown.
+     *
+     * Quitting it here and awaiting its `'close'` crashed the renderer --
+     * SIGSEGV reading a corrupted compressed pointer, no JavaScript frame to
+     * blame. It needs both RPC traffic and a disconnect: 216 non-RPC tests, 432
+     * traffic-free connect cycles and 2,400 toggle-free requests were all
+     * clean, while specs doing both crashed 24 of 46 runs. Stubbing the
+     * extmark, float, line and cursor handlers changed nothing, so the fault
+     * was never in what we do with the data.
+     *
+     * This is a mitigation, not a cure, and the numbers say so: dropping the
+     * synchronous quit-and-wait takes it from 24/46 (52%) to 7/38 (18%),
+     * p = 0.002. A residual path survives -- never killing the child at all
+     * still crashed 3 of 8 -- so do not read this as fixed.
+     *
+     * No `qa!` here: sending it made Neovim exit immediately, which is the
+     * thing that must not happen. SIGTERM lets Neovim exit on its own terms and
+     * preserve its swap file, and this mirror buffer is `acwrite` -- Obsidian
+     * owns the file, so there is nothing of the user's to lose. Nothing is
+     * awaited, and both timers self-check `exitCode`/`signalCode`, so a child
+     * that has already gone is left alone. If the window dies first the pipes
+     * close with it and `nvim --embed` exits on channel close regardless.
+     */
+    private scheduleChildShutdown(child: ChildProcessHandle): void {
+        window.setTimeout(() => {
+            if (child.exitCode !== null || child.signalCode !== null) return;
+            child.kill('SIGTERM');
+            window.setTimeout(() => {
+                if (child.exitCode !== null || child.signalCode !== null)
+                    return;
+                child.kill('SIGKILL');
+            }, SIGKILL_ESCALATION_MS);
+        }, DEFERRED_SHUTDOWN_DELAY_MS);
     }
 
     private handleClose(
