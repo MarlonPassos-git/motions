@@ -463,14 +463,27 @@ docker run --rm --cpus=2 --memory=4g --shm-size=2g \
 The image's own entrypoint fails to start Xvfb on `:99` under a bind mount, so
 the display is started by hand on `:77`.
 
-**The failure is resource-dependent**, which is why 432 decomposition cycles
-came back clean: every variant ran unconstrained, on 16 cores, where the same
-spec fails about one run in six. Constraining to a quarter of that makes it
-two in two.
+It reproduces in the container, not because of any particular limit: 5 of 7
+container runs failed against roughly one in six on the host. The container is
+the trigger, and it is also what CI uses, which is the point.
 
-This is the first reproduction that does not need CI, and it turns a 45-minute
-round trip into five minutes. Which resource matters -- cores, memory, or
-both -- is the next thing to separate.
+Eliminated by measurement while looking for the limit that mattered:
+
+| Candidate                 | Measurement                                                                                                     |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| total memory              | peaked at **852 MiB** against an 8 GiB cap, and 8 GiB runs fail too                                             |
+| memory growth             | cgroup `memory.current` _declines_ over a run, 682 → 575 MiB                                                    |
+| `/dev/shm`                | fails identically at `--shm-size=256m` and `8g`                                                                 |
+| CPU count                 | fails at both 2 and 4 cores; the one clean container run was 2 cores                                            |
+| process or handle buildup | `obsidian` holds at 6 processes from early to late in a run that failed; `esbuild` at 2; zombies never exceed 1 |
+
+The buildup hypothesis was worth testing and is **not supported**. An earlier
+reading of "obsidian 3 → 10" came from a sampler whose `pgrep -c ... || echo 0`
+split each record across two lines; with that fixed the count is flat, and the
+3 was startup ramp rather than a leak.
+
+So the mechanism is still unidentified — but the loop is now five minutes
+instead of forty-five, which is the thing that was missing all along.
 
 ## Bisect of the RPC cycle against its surroundings
 
