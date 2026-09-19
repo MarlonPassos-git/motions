@@ -444,6 +444,80 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## The RPC cluster is teardown, not a renderer death
+
+Timing every step from Node — `STEP n start/ok/THREW <label> <ms>`, so a call
+that starts and never finishes names itself — caught it in the act:
+
+```
+STEP 161 ok    rpc:getLines0      6ms
+STEP 162 ok    rpc:getCursor0     5ms
+STEP 163 ok    fork:rpcOff       22ms
+STEP 164 THREW fork:waitRpcOff  78147ms
+```
+
+Every RPC request runs in 5-6 ms and `getValue`/`getCursor` in 2-4 ms right up
+to the end. There is no latency creep and no gradual degradation: the failure
+is abrupt, and it is `waitForRpc(false)` — waiting for the backend to report
+_disconnected_ — hanging and throwing.
+
+That explains the shape of the whole cluster. Half of these failures land in
+`before each`/`after each`, which is exactly where `setRpcEnabled(false)` and
+`waitForRpc(false)` run, and it is why the failing _test name_ varies from run
+to run while the specs stay the same. It also fits the exit wrapper reporting a
+clean `rc=0`: the child does exit correctly, just far too slowly.
+
+The 78 s is itself evidence. `waitForRpc` has a **10 s** timeout, and
+`browser.waitUntil` only checks the clock between iterations, so a 10 s budget
+can overshoot to 78 s only if a single `getRpcState()` round trip blocked for
+roughly 68 s. The renderer was unresponsive during teardown — which is what the
+earlier "stall inside `executeObsidian`" reading was seeing, from the wrong end.
+
+`disconnectChild` in `src/rpc/neovim-connection.ts` has two defects that fit:
+
+1. `await this.featureBridge?.stop()` is the **first** statement, and it issues
+   RPC round trips to a Neovim that is on its way out. `this.connected = false`
+   is not reached until ~20 lines later, so every observer keeps seeing
+   `connected === true` for however long that await takes. `waitForRpc(false)`
+   is one such observer.
+2. The close-Promise settles **only** via `child.once('close', ...)`. The
+   `GRACEFUL_EXIT_TIMEOUT_MS` timer sends `SIGKILL` but never resolves, so if
+   `close` does not arrive the await is permanent. This is the inverse of the
+   `promise-owned-listener` shape the project's own ast-grep rule targets, and
+   worth checking against the test harness: `neovimBinaryPath` points at
+   `nvim-exit-wrapper.sh`, and unless that wrapper `exec`s, `SIGKILL` on the
+   shell leaves an `nvim` grandchild holding the inherited stdio pipes open,
+   which is precisely a `close` that never fires.
+
+Not yet proven: which of the two produces the 68 s renderer block, and whether
+an unresolved Promise alone can account for it (it should not — an orphaned
+Promise does not block a main thread, so something synchronous is still
+unexplained). Clearing `connected` before the awaits and giving the Promise a
+settle path are both correct regardless, and the second is testable directly by
+checking whether the wrapper `exec`s.
+
+The wrapper mechanism is real and was fixed, and it is **not** the cause. The
+wrapper ran `"$REAL_NVIM" "$@"` without `exec`, so the tree really was
+Obsidian -> bash -> nvim with the shell as the plugin's `child`, and the
+grandchild really would hold the pipes open past a `SIGKILL`. Converting it to
+`exec` did not move the failure rate: **2 of 4 runs still failed**, against a
+baseline of roughly 5 in 7. Those two rates are indistinguishable at this
+sample size, and two clean runs is precisely the evidence that made
+`--privileged` look like an answer an hour earlier.
+
+Neither of those two failures carried `did not become disconnected`, so at
+least one failure mode exists that is not the teardown hang. The 78 s hang was
+observed once, is real, and is not the whole cluster.
+
+What stands regardless of flakiness: the `exec` fix, because the plugin should
+own the real process rather than a shell that swallows its signals; and the two
+`disconnectChild` defects above, because clearing `connected` after an awaited
+call that can hang, and a Promise whose only settle path is an event that may
+never arrive, are both wrong on their own terms.
+
+Reproducing: wrap each step of `forkSnapshots`/`rpcSnapshots` in a `timed()`
+helper that logs from Node, run the container loop, and read the last STEP line.
+
 ## No container setting explains it, and privileged was luck
 
 Seven axes, one run each unless noted, against a baseline that fails roughly

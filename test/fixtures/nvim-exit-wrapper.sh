@@ -23,11 +23,13 @@ if [ -z "$REAL_NVIM" ]; then
 fi
 [ -z "$REAL_NVIM" ] && REAL_NVIM="$(command -v nvim || echo nvim)"
 
-"$REAL_NVIM" "$@"
-rc=$?
-
-# Bash reports a signalled child as 128+signal, so both cases are recoverable
-# from this one number.
-printf '%s pid=%s rc=%s\n' "$(date -u +%H:%M:%S)" "$$" "$rc" >>"$NVIM_EXIT_LOG"
-
-exit "$rc"
+# exec is load-bearing. Without it the tree is Obsidian -> bash -> nvim and the
+# plugin's `child` is the shell, so the SIGKILL in disconnectChild leaves the
+# nvim grandchild alive holding the inherited stdio pipes. Node emits 'close'
+# only once every write end is gone, so it never fires and the disconnect await
+# never settles. exec gives the plugin the real process.
+#
+# This costs the rc recording, which needed the shell to outlive Neovim, and
+# that has already answered its question: healthy teardown records rc=0. Both
+# readers of NVIM_EXIT_LOG are guarded and degrade to empty.
+exec "$REAL_NVIM" "$@"
