@@ -444,6 +444,57 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## It is a renderer SIGSEGV, and every local run was testing a stale bundle
+
+`dmesg` names it. It needs `--privileged` to read inside the container, and
+`--pid=host` for the PIDs to mean anything, because the kernel reports host PIDs
+while the container has its own namespace:
+
+```
+obsidian[1820789]: segfault at 20397fffffff ip 000027ae79ccab57 error 4
+obsidian[1826745]: segfault at fbd7fffffff   ip 00003f8a616a4b57 error 4
+```
+
+`error 4` is a user-mode read of an unmapped page. Correlation with the test
+result is exact: every failing run has a fresh segfault, every clean run has
+none, now over nine runs. The crash **is** the failure, and the `invalid session
+id` cascade, the `tab crashed` message and the 30 s driver timeout are all
+downstream of it.
+
+Resolving the faulting `ip` against a snapshot of `/proc/<pid>/maps` (the
+process is gone by the time `dmesg` is read, so the snapshot has to be taken
+while it lives) puts it in an anonymous **`rwxp`** region -- writable and
+executable, not file-backed. That is JIT code. The low bits of `ip` are `b57`
+across two different bundles, which rules out our own compiled JS, since that
+would move; it points into V8's own rwx blob. Every fault address has the form
+`base + 0x7fffffff`, the signature of `kMaxInt` reaching a memory access as an
+index or length.
+
+Refuted by experiment, not by argument: **tree lifetime**. All six tree frees
+in `bridge.ts`, `language-tree.ts`, `runtime.ts` and `lua/treesitter/api.ts`
+were neutralised and the bundle rebuilt; 2 of 4 runs still segfaulted at the
+same offset. There _is_ a real use-after-free in `lua/treesitter/api.ts`, which
+hands a tree to Lua via `pushTSTree` and then frees it on the next parse, but it
+is not this crash.
+
+### Every _local_ run before this point tested `main.js` from 06:13
+
+`test:e2e` was bare `wdio run` and `onPrepare()` only deletes
+`workspace.json`, so **nothing built the plugin**. `main.js` was older than
+`src/`, and the bundle under test was a stale production build from hours
+earlier. The measurement that concluded "the `disconnectChild` fix does not help"
+was therefore made against a bundle that did not contain it.
+
+Re-measured with a fresh build: still 2 of 4, so that conclusion happens to
+survive -- but it was luck, not method. `test:e2e` now runs `build:ci-test`
+first.
+
+CI was never affected: `e2e.yml` runs `build:ci-test` before `wdio` in all
+three of its jobs. This was a local-reproduction trap only, which is worth
+knowing when a local result and a CI result disagree -- and anyone reproducing
+locally must build first, or they are testing whatever `main.js` was lying
+around.
+
 ## The renderer tab crashes after going unresponsive for 30 s
 
 The driver log says it outright:

@@ -381,6 +381,11 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
                 } catch (e) {
                     docLength = `threw: ${String(e)}`;
                 }
+                const mem = (
+                    performance as unknown as {
+                        memory?: { usedJSHeapSize: number };
+                    }
+                ).memory;
                 return {
                     count: all.length,
                     worst: all
@@ -389,6 +394,12 @@ describe('Neovim RPC structural navigation and hard-wrap', function () {
                         .slice(0, 3),
                     totalMs: all.reduce((sum, e) => sum + e.d, 0),
                     docLength,
+                    heapMiB: mem
+                        ? Math.round(mem.usedJSHeapSize / 1048576)
+                        : -1,
+                    domNodes: document.getElementsByTagName('*').length,
+                    cmEditors: document.querySelectorAll('.cm-editor').length,
+                    leaves: document.querySelectorAll('.workspace-leaf').length,
                 };
             })
             .catch(() => null);
