@@ -1,0 +1,30 @@
+{
+    // test/ sits outside tsconfig.json's src/**/*.ts include, so nothing
+    // type-checked it: a broken import passed typecheck, lint and format alike
+    // and surfaced only when the spec ran. That cost three bugs in one session
+    // -- a missing getVimMode import, an import of useSourceProperties that
+    // helpers never exported, and a node:path call placed inside a browser
+    // callback.
+    //
+    // Strict mode reports 4181 errors here, because the suite uses loose typing
+    // deliberately and eslint already switches those rules off for test/. The
+    // relaxations below leave module and name resolution untouched, which is
+    // the class that actually broke, while not demanding a typing overhaul.
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "strict": false,
+        "noUnusedLocals": false,
+        "noImplicitAny": false,
+        "types": [
+            "@obsidian-typings/obsidian-public-latest",
+            "node",
+            "mocha",
+            "vitest/globals"
+        ]
+    },
+    // Vendored, and checked as part of src by the main typecheck. It reports
+    // two errors under the relaxed settings above, which say nothing about the
+    // tests.
+    "include": ["test/**/*.ts"]
+}
