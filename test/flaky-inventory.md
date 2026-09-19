@@ -444,6 +444,34 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## Reproduced locally in a resource-constrained container
+
+Running the real spec inside the CI image with `--cpus=2 --memory=4g`
+reproduces it on demand: two runs, both 10 passing and 2 failing, both with
+`invalid session id` and one naming
+`matches navigation across nested list items` and the `"after each"` hook.
+
+```
+docker run --rm --cpus=2 --memory=4g --shm-size=2g \
+  -v "$PWD:/work" -w /work -e CI=true \
+  --entrypoint bash ghcr.io/saberzero1/motions/e2e-runner:latest -lc '
+    Xvfb :77 -screen 0 1280x1024x24 & sleep 3; export DISPLAY=:77
+    herbstluftwm & sleep 1
+    npx wdio run ./wdio.conf.mts --spec test/specs/rpc-structural-nav.e2e.ts'
+```
+
+The image's own entrypoint fails to start Xvfb on `:99` under a bind mount, so
+the display is started by hand on `:77`.
+
+**The failure is resource-dependent**, which is why 432 decomposition cycles
+came back clean: every variant ran unconstrained, on 16 cores, where the same
+spec fails about one run in six. Constraining to a quarter of that makes it
+two in two.
+
+This is the first reproduction that does not need CI, and it turns a 45-minute
+round trip into five minutes. Which resource matters -- cores, memory, or
+both -- is the next thing to separate.
+
 ## Bisect of the RPC cycle against its surroundings
 
 Each variant is six cold Linux replicas at twelve cycles, so 72 cycles per row,
