@@ -1,6 +1,12 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { browser } from '@wdio/globals';
+// Type-only, erased at runtime. This file uses WebdriverIO.Config and
+// browser.executeObsidian, both of which are `declare global` augmentations
+// that only load if their package is imported. Without these the file reports
+// 22 errors; it reported none only because nothing type-checked it.
+import type {} from 'webdriverio';
+import type {} from 'wdio-obsidian-service';
 
 export const config: WebdriverIO.Config = {
     runner: 'local',
