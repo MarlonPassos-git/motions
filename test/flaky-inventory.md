@@ -521,6 +521,52 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### The cores: a -1 used as an unsigned 32-bit offset
+
+Two cores were extracted with `coredumpctl dump` and read in a container with
+`gdb` (33 GiB each uncompressed, so delete them afterwards). Both stacks stop at
+frame 0 -- `?? ()`, no unwind past it, which is what JIT frames look like
+without frame pointers. The registers are the evidence:
+
+|           | core A             | core B             |
+| --------- | ------------------ | ------------------ |
+| `rip`     | `0x687a279ab57`    | `0x1d70d38996d4`   |
+| `rbx`     | `0x37e880000000`   | `0x87d80000000`    |
+| offending | `rdx = 0xffffffff` | `rsi = 0x5b000000` |
+| fault     | `0x37e97fffffff`   | `0x87ddb00000c`    |
+
+For core A the arithmetic is exact: `0x37e880000000 + 0xffffffff =
+0x37e97fffffff`. `rax` held `0xfffffffb`, which is `(uint32)(-5)`. Core B is the
+same shape, `rbx + rsi + 0xc`, with a ~1.5 GiB offset.
+
+So both crashes are **a negative number used as an unsigned 32-bit offset from a
+large base**. `-1` becomes `0xffffffff` and reads ~4 GiB past the base, outside
+any guard region, so it faults instead of trapping.
+
+The base registers matter: `0x...80000000` values are cage- or
+reservation-aligned, and a `0xffffffff` offset from a cage base is a **corrupted
+compressed pointer** -- V8 reading a field off a garbage object. That is
+engine-level corruption rather than a JavaScript logic error, which is the best
+available explanation for why fourteen application-level hypotheses in this file
+all died.
+
+Where the `-1` does _not_ come from: `bridge.ts`. `PointScanner.at()` and
+`advancePoint()` only ever increment row and column from 0, contain no
+`indexOf`, and `translateChanges` derives `startIndex`, `oldEndIndex` and
+`newEndIndex` from CodeMirror offsets that cannot go negative. Worth noting that
+the earlier clamp probe covered `descendantForPosition` but **not** `tree.edit()`,
+so it could not have caught a bad edit; the edit path was checked by reading it
+instead.
+
+**Electron version is refuted.** `installerVersion` was switched from `earliest`
+(Chrome 120, December 2023) to `latest`: 1 of 4 runs still segfaulted, at
+`0x203effffffff`, the same `base + 0xffffffff` fingerprint with a different `ip`
+offset because the build differs. The pin was restored, since `earliest` is a
+deliberate minimum-supported-installer policy.
+
+The durable artefact here is the fingerprint. Any future crash showing
+`fault == base + 0xffffffff` is this bug; anything else is not.
+
 ### Every _local_ run before this point tested `main.js` from 06:13
 
 `test:e2e` was bare `wdio run` and `onPrepare()` only deletes
