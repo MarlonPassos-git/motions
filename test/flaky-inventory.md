@@ -444,6 +444,46 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## The RPC cluster is the WebDriver session dying
+
+Reading the actual error instead of counting passes and failures settles it.
+Three consecutive failing container runs, identical error, different call site:
+
+```
+WebDriverError: invalid session id when running "execute/sync"
+  at async rpcSnapshots   (run 1)
+  at async waitForRpc     (run 2)
+  at async getNotices     (run 3)
+```
+
+The session is **gone**, so every later `executeObsidian` fails instantly. That
+is why the count is always exactly `2 failing`: the test that first touches the
+dead session, plus the `after each` hook that touches it next. The test _name_
+varies only by when the death lands, which is the whole reason this looked like
+six unrelated flaky specs with a rotating cast of failures.
+
+So it is not a hang, not teardown, and not an RPC problem. Obsidian or its
+renderer is dying mid-run, and everything downstream is an artefact of asking a
+dead session questions.
+
+This also corrects the section below. The 78 s `waitRpcOff` throw was one
+atypical instance and I generalised from it; `did not become disconnected` did
+not recur in any of the **nine** runs after it. The two `disconnectChild`
+defects found along the way are real and are fixed, but they are not this
+cluster: with both fixed, 3 of 5 runs still failed, against a baseline near 2
+in 3.
+
+Not yet known: why the process dies. Memory is already excluded (852 MiB peak
+against 8 GiB, and the cgroup figure falls during a run), so this is not an OOM
+kill. The open candidates are an Electron renderer crash under Xvfb, a
+ChromeDriver-side session timeout, and a main-process crash. The next
+measurement is the ChromeDriver log, the Electron exit code and `dmesg` from
+inside the container, none of which have been looked at yet.
+
+Worth noting for whoever picks this up: the failure names were available from
+the first container run and I spent this phase counting `N passing / N failing`
+instead of reading them. The error was one `grep` away the whole time.
+
 ## The RPC cluster is teardown, not a renderer death
 
 Timing every step from Node — `STEP n start/ok/THREW <label> <ms>`, so a call
