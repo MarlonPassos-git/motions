@@ -474,12 +474,28 @@ conclusion. Every fault address has the form
 `base + 0x7fffffff`, the signature of `kMaxInt` reaching a memory access as an
 index or length.
 
-Refuted by experiment, not by argument: **tree lifetime**. All six tree frees
-in `bridge.ts`, `language-tree.ts`, `runtime.ts` and `lua/treesitter/api.ts`
-were neutralised and the bundle rebuilt; 2 of 4 runs still segfaulted at the
-same offset. There _is_ a real use-after-free in `lua/treesitter/api.ts`, which
-hands a tree to Lua via `pushTSTree` and then frees it on the next parse, but it
-is not this crash.
+Refuted by experiment, not by argument: **the entire use-after-free class**.
+First all six tree frees were neutralised and the bundle rebuilt -- 2 of 4 runs
+still segfaulted. That test was incomplete, because queries and parsers are
+freed too and `named-queries.ts` invalidates queries by revision at runtime, so
+the second pass neutralised **all twelve** handle frees across `bridge.ts`,
+`language-tree.ts`, `runtime.ts`, `query.ts`, `named-queries.ts` and
+`lua/treesitter/api.ts`. With nothing freed at all a use-after-free is
+impossible, and it **still segfaulted** at the same `b57` site.
+
+So the fault is a **bad index, not a stale pointer**, which reframes it
+usefully: something passes a large value into a WASM-backed call, and
+`0x7fffffff` is exactly the `MAXCOL` that `coordinates.ts:227` maps `Infinity`
+to. web-tree-sitter converts a `{row, column}` position to a byte offset without
+clamping, so a `MAXCOL` column reaching `descendantForPosition` or
+`namedDescendantForPosition` indexes WASM linear memory about 2 GiB past its
+base, beyond the guard region, where it faults for real instead of trapping.
+`lua/treesitter/api.ts` calls `namedDescendantForPosition` with a
+caller-supplied position.
+
+There _is_ still a real use-after-free in `lua/treesitter/api.ts`, which hands a
+tree to Lua via `pushTSTree` and then frees it on the next parse. It is a
+genuine bug on its own terms, and it is not this crash.
 
 ### Every _local_ run before this point tested `main.js` from 06:13
 
