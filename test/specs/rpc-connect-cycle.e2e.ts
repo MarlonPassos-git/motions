@@ -53,6 +53,20 @@ async function setRpc(enabled: boolean): Promise<void> {
     );
 }
 
+// Spec-local in rpc-structural-nav rather than a shared helper, so it is
+// duplicated here rather than imported. test/ sits outside the tsconfig
+// include, so a bad import passes typecheck, lint and format alike and only
+// fails when the spec actually runs.
+async function useSourceProperties(): Promise<void> {
+    await browser.executeObsidian(({ app }) => {
+        (
+            app.vault as unknown as {
+                setConfig(key: string, value: unknown): void;
+            }
+        ).setConfig('propertiesInDocument', 'source');
+    });
+}
+
 async function isConnected(): Promise<boolean> {
     return browser.executeObsidian(({ app }) => {
         const plugin = (
@@ -71,11 +85,24 @@ describe('Neovim RPC connect/disconnect cycle', function () {
         requireRpcPrerequisites(this);
     });
 
+    // The bare cycle is clean 72 times out of 72 on the platform where the
+    // full spec fails about four runs in six, so the cause is an interaction
+    // with what the real hooks put around it. RPC_CYCLE_VARIANT selects how
+    // much of that to add back, one element at a time, so the first variant
+    // that fails names the interaction.
+    const variant = process.env.RPC_CYCLE_VARIANT ?? 'bare';
+
     it('reports whether every cycle settles', async function () {
         await loadSingleFileWorkspace();
 
         const cycles: string[] = [];
         for (let i = 0; i < 12; i++) {
+            if (variant === 'workspace' || variant === 'workspace+source') {
+                await loadSingleFileWorkspace();
+            }
+            if (variant === 'workspace+source') {
+                await useSourceProperties();
+            }
             let up = '?';
             let down = '?';
             try {
@@ -104,6 +131,7 @@ describe('Neovim RPC connect/disconnect cycle', function () {
 
         console.log(
             `RPCCYCLE ${JSON.stringify({
+                variant,
                 cycles: cycles.join(' '),
                 completed: cycles.length,
                 settled: cycles.every((c) => c === 'UD'),

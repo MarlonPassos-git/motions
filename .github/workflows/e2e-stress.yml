@@ -20,6 +20,10 @@ on:
                 description: 'Parallel jobs, each contributing one cold start'
                 required: true
                 default: '1'
+            variant:
+                description: 'RPC_CYCLE_VARIANT for rpc-connect-cycle (bare, workspace, workspace+source)'
+                required: false
+                default: 'bare'
             os:
                 description: 'Runner'
                 required: true
@@ -35,6 +39,10 @@ on:
 # readable. Obsidian inherits this and spawns the child, so it propagates.
 env:
     NVIM_LOG_FILE: /tmp/nvim-debug.log
+    # Selects how much of the real hooks' surroundings rpc-connect-cycle adds
+    # back, so the bisect runs where the failure rate is high rather than
+    # locally, where every variant settles.
+    RPC_CYCLE_VARIANT: ${{ inputs.variant }}
 
 jobs:
     # Only the first iteration of a job is a cold start, and a cold start is
