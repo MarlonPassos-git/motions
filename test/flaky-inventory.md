@@ -37,7 +37,7 @@ skip on that condition explicitly rather than silently vary.
 | `cursor follows cursor movement`                                           | macOS           | 2 of last 3             | **Resolved — environment.** Same unfocused-window cause as the fold pair; `document.hasFocus()` matched the outcome 8/8. No link to #181.                                                                                                    |
 | `]3 should jump to next H3`                                                | macOS and Linux | 4                       | **Resolved — product.** `isTreeAvailable()` reports a tree exists; `getAllNodesOfType` returns `[]` for one that is absent, stale or freed, and the motion returned the cursor unmoved with no fallback. Fixed in `src/motions/headings.ts`. |
 | `the animated cursor picks up a shape change (#181)`                       | macOS           | 1                       | Unknown. Fails on its canvas-paint precondition, not on the scroll defect #181 describes.                                                                                                                                                    |
-| `focuses the expected pane in all four directions`                         | macOS           | 1                       | Unknown.                                                                                                                                                                                                                                     |
+| `focuses the expected pane in all four directions`                         | macOS           | 3                       | **Focus excluded, three samples.** Latest: `cmFocused` true, focused window, 28-char document, no notices. A test rather than a hook, so possibly distinct from the hook cluster.                                                            |
 | `"after each" hook — RPC key delegation`                                   | macOS           | 1                       | Unknown.                                                                                                                                                                                                                                     |
 | `"after each" hook — RPC structural navigation`                            | Linux           | 2/5 in CI, ~1/3 locally | Unknown. A cascade, not a cause: the session dies in the preceding test.                                                                                                                                                                     |
 | `matches counted operator-pending heading motion edits`                    | Linux           | 1                       | Unknown.                                                                                                                                                                                                                                     |
@@ -453,11 +453,14 @@ on the platform where the full spec fails about four runs in six.
 | ------------------ | ----------------------------------- | ------------- |
 | `bare`             | nothing                             | 72/72 settled |
 | `workspace`        | `loadSingleFileWorkspace` per cycle | 72/72 settled |
-| `workspace+source` | …plus `useSourceProperties`         | pending       |
+| `workspace+source` | …plus `useSourceProperties`         | 72/72 settled |
 
-So neither the connect/disconnect cycle nor the workspace load reproduces it.
-What remains untested is `useSourceProperties` and the editor work the real
-tests do between cycles.
+216 cycles on Linux without a single failure. None of the three reproduces it,
+so the only untested difference left is the editor work the real tests do
+between cycles — `setupEditor`, key dispatch, `getEditorValue`.
+
+The same variant now runs on macOS with nothing else changed, since a clean
+Linux bisect says nothing about the platform where most recent failures land.
 
 Note the platform split: the bisect runs on Linux, while recent failures have
 been macOS RPC hooks — `"after each" hook for Neovim RPC connection lifecycle`
