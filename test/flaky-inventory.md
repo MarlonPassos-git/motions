@@ -454,11 +454,24 @@ on the platform where the full spec fails about four runs in six.
 | `bare`             | nothing                                             | 72/72 settled                               |
 | `workspace`        | `loadSingleFileWorkspace` per cycle                 | 72/72 settled                               |
 | `workspace+source` | …plus `useSourceProperties`                         | 72/72 settled (Linux), 6/6 replicas (macOS) |
-| `editor`           | …plus `setupEditor`, cursor moves, `getEditorValue` | pending, both platforms                     |
+| `editor`           | …plus `setupEditor`, cursor moves, `getEditorValue` | 72/72 both platforms                        |
 
-216 cycles on Linux without a single failure. None of the three reproduces it,
-so the only untested difference left is the editor work the real tests do
-between cycles — `setupEditor`, key dispatch, `getEditorValue`.
+About 432 cycles across four variants and both platforms without a single
+failure. Decomposition is exhausted: no element of the connect/disconnect path,
+the workspace load, source properties, or the editor work reproduces the
+failure, on either platform, and the `editor` variant calls the very function
+the stall lands inside.
+
+So the failure needs something none of the variants has: most likely the volume
+and interleaving of the real spec — fourteen tests, dozens of RPC round trips,
+repeated connect and disconnect under sustained load — rather than any single
+element of it. Four clean decompositions are themselves the finding.
+
+The next step is therefore to stop decomposing and stress the real spec, which
+is the only configuration known to fail and already carries the Node-side
+instrumentation: `/proc` state, the wrapper's exit status, and the per-test log
+delta, none of which the browser-side diagnostic can reach once the session
+dies.
 
 The same variant now runs on macOS with nothing else changed, since a clean
 Linux bisect says nothing about the platform where most recent failures land.
