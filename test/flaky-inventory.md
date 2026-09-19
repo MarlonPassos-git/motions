@@ -497,6 +497,30 @@ There _is_ still a real use-after-free in `lua/treesitter/api.ts`, which hands a
 tree to Lua via `pushTSTree` and then frees it on the next parse. It is a
 genuine bug on its own terms, and it is not this crash.
 
+### MAXCOL is refuted too, and there are two crash signatures
+
+A clamp-and-log probe was added at all seven `descendantForPosition` /
+`namedDescendantForPosition` boundaries -- `js-api.ts`, `language-tree.ts` x2,
+`runtime.ts` x2, `lua/treesitter/node.ts` and `lua/treesitter/api.ts` -- logging
+and clamping any row or column outside `[0, 1e6]`.
+
+Across four runs it logged **zero** hits, and 2 of 4 still segfaulted. No
+oversized position ever reaches tree-sitter, so `MAXCOL` does not get there and
+that hypothesis is dead. It was a good fit for the fault address and still
+wrong, which is the recurring lesson in this file.
+
+The probe did surface something the pass/fail counts had hidden. One crash
+landed at `addr=87ddb00000c`, `ip=...96d4`, which matches neither the
+`base + 0x7fffffff` shape nor the `...b57` code site seen everywhere else. So
+there are **at least two distinct crash signatures**, and any theory explaining
+only the `0x7fffffff` one was always going to leave failures behind. That is
+consistent with how many single-mechanism explanations have now died here.
+
+Refuted so far, each by measurement: OOM and memory growth, `/dev/shm`, CPU
+count, process and handle buildup, six container security and namespace
+settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
+growth, the whole tree-sitter use-after-free class, and oversized positions.
+
 ### Every _local_ run before this point tested `main.js` from 06:13
 
 `test:e2e` was bare `wdio run` and `onPrepare()` only deletes
