@@ -1,6 +1,11 @@
 import { browser } from '@wdio/globals';
 import { resolve as resolvePath } from 'node:path';
-import { loadSingleFileWorkspace } from '../helpers';
+import {
+    getEditorValue,
+    loadSingleFileWorkspace,
+    setupEditor,
+    vimKeys,
+} from '../helpers';
 import { requireRpcPrerequisites } from './rpc-prerequisites';
 
 // Half the RPC failures are before-each or after-each hooks, across three
@@ -96,12 +101,25 @@ describe('Neovim RPC connect/disconnect cycle', function () {
         await loadSingleFileWorkspace();
 
         const cycles: string[] = [];
+        const docLengths: number[] = [];
         for (let i = 0; i < 12; i++) {
-            if (variant === 'workspace' || variant === 'workspace+source') {
+            if (variant !== 'bare') {
                 await loadSingleFileWorkspace();
             }
-            if (variant === 'workspace+source') {
+            if (variant === 'workspace+source' || variant === 'editor') {
                 await useSourceProperties();
+            }
+            // The last untested difference from the real specs. 216 Linux
+            // cycles settled without it, and the stall the failures show lands
+            // inside getEditorValue, so this is the element most likely to
+            // matter rather than merely the next one on the list.
+            if (variant === 'editor') {
+                await setupEditor('# A\nbody\n## B\nbody\n### C', {
+                    line: 0,
+                    ch: 0,
+                });
+                await vimKeys('j', 'j');
+                docLengths.push((await getEditorValue()).length);
             }
             let up = '?';
             let down = '?';
@@ -133,6 +151,7 @@ describe('Neovim RPC connect/disconnect cycle', function () {
             `RPCCYCLE ${JSON.stringify({
                 variant,
                 cycles: cycles.join(' '),
+                docLengths,
                 completed: cycles.length,
                 settled: cycles.every((c) => c === 'UD'),
             })}`,
