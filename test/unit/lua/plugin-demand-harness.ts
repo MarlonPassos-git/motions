@@ -31,6 +31,17 @@ import {
 } from '../../fixtures/neovim-coordinate-contract';
 import { runLuaString } from './coordinate-harness';
 
+// src/types/codemirror-vim.d.ts declares `Vim` as Record<string, unknown>, so
+// every member reads as `unknown` and cannot be called. These four are the fork
+// surface this harness drives.
+type OperatorFunc = (cm: unknown, type: string) => void;
+const forkVim = Vim as unknown as {
+    getOperatorfunc: () => OperatorFunc | null | undefined;
+    setOperatorfunc: (fn: OperatorFunc | null | undefined) => void;
+    map: (lhs: string, rhs: string, ctx: string) => void;
+    unmap: (lhs: string, ctx: string) => void;
+};
+
 export type Category = 'real' | 'stub' | 'silent' | 'absent';
 export interface DemandProbe {
     lookup?: string;
@@ -50,7 +61,7 @@ export interface DemandProbe {
 export function createDemandState(asyncFns = true) {
     const L = createSandboxedState();
     const runner = new CoroutineRunner(L);
-    const previousOperatorfunc = Vim.getOperatorfunc();
+    const previousOperatorfunc = forkVim.getOperatorfunc();
     const autocmd = new AutocmdManager(L);
     const highlights = new HighlightManager();
     const mappings: LuaKeymap[] = [];
@@ -108,7 +119,7 @@ export function createDemandState(asyncFns = true) {
         getVaultName: () => 'demand-audit',
         onKeymap: (map) => {
             mappings.push(map);
-            if (map.rhs) Vim.map(map.lhs, map.rhs, map.mode);
+            if (map.rhs) forkVim.map(map.lhs, map.rhs, map.mode);
         },
         onKeymapDel: () => {},
         getVimApi: () => Vim as unknown as VimApi,
@@ -228,13 +239,18 @@ export function createDemandState(asyncFns = true) {
         observers,
         view,
         destroy() {
-            runCleanups([
-                () => timers.destroyAll(),
-                () => runner.destroyAll(),
-                ...mappings.map((map) => () => Vim.unmap(map.lhs, map.mode)),
-                () => Vim.setOperatorfunc(previousOperatorfunc),
-                () => destroyState(L),
-            ]);
+            runCleanups(
+                [
+                    () => timers.destroyAll(),
+                    () => runner.destroyAll(),
+                    ...mappings.map(
+                        (map) => () => forkVim.unmap(map.lhs, map.mode),
+                    ),
+                    () => forkVim.setOperatorfunc(previousOperatorfunc),
+                    () => destroyState(L),
+                ],
+                'plugin demand harness',
+            );
         },
     };
 }
