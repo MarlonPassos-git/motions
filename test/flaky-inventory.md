@@ -444,6 +444,28 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## Bisect of the RPC cycle against its surroundings
+
+Each variant is six cold Linux replicas at twelve cycles, so 72 cycles per row,
+on the platform where the full spec fails about four runs in six.
+
+| Variant            | Adds                                | Result        |
+| ------------------ | ----------------------------------- | ------------- |
+| `bare`             | nothing                             | 72/72 settled |
+| `workspace`        | `loadSingleFileWorkspace` per cycle | 72/72 settled |
+| `workspace+source` | …plus `useSourceProperties`         | pending       |
+
+So neither the connect/disconnect cycle nor the workspace load reproduces it.
+What remains untested is `useSourceProperties` and the editor work the real
+tests do between cycles.
+
+Note the platform split: the bisect runs on Linux, while recent failures have
+been macOS RPC hooks — `"after each" hook for Neovim RPC connection lifecycle`
+and `… key delegation` on `d09d53e`. The cluster spans both, so a Linux bisect
+that stays clean does not exonerate the macOS side; if `workspace+source` also
+settles, the next variant should carry the editor work, and a macOS dispatch is
+worth running alongside it.
+
 ## The RPC failures are concentrated in setup and teardown
 
 Across seven runs, every RPC-related failure:
