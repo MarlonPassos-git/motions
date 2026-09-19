@@ -465,8 +465,12 @@ Resolving the faulting `ip` against a snapshot of `/proc/<pid>/maps` (the
 process is gone by the time `dmesg` is read, so the snapshot has to be taken
 while it lives) puts it in an anonymous **`rwxp`** region -- writable and
 executable, not file-backed. That is JIT code. The low bits of `ip` are `b57`
-across two different bundles, which rules out our own compiled JS, since that
-would move; it points into V8's own rwx blob. Every fault address has the form
+across the two `ci-test` bundles, which differ by six lines, while the earlier
+production bundle faulted at `c17`, `5d7` and `792`. The offset moves when the
+bundle changes materially and holds when it barely changes, so this is **our own
+JIT-compiled JavaScript**, not V8's blob. An earlier note here claimed the
+opposite; it compared two nearly identical bundles and drew the wrong
+conclusion. Every fault address has the form
 `base + 0x7fffffff`, the signature of `kMaxInt` reaching a memory access as an
 index or length.
 
