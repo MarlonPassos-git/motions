@@ -444,6 +444,42 @@ strongest form of incapability, not every form.
 
 Fold works on all three runners, so no graphics explanation applies to it.
 
+## The renderer tab crashes after going unresponsive for 30 s
+
+The driver log says it outright:
+
+```
+chromedriver: [SEVERE]: Timed out receiving message from renderer: 30.000
+webdriver: WebDriverError: unknown error: session deleted because of page crash
+from tab crashed
+```
+
+The `obsidian` process count goes 3 -> 6 and never reaches 0, so the main
+process is fine; it is the **renderer** that dies. No Crashpad `.dmp` is
+written, and `dmesg` is not readable inside the container, though an OOM kill
+was already excluded at 852 MiB peak against 8 GiB.
+
+That is the whole chain, and it makes every earlier observation consistent:
+
+1. the renderer main thread blocks
+2. ChromeDriver gives up at its 30 s renderer timeout
+3. the tab is declared crashed and the session is deleted
+4. every later `executeObsidian` returns `invalid session id`
+
+Steps 3 and 4 are what the section below describes, and they are downstream.
+The single 78 s `waitRpcOff` throw was not the anomaly I dismissed it as: a
+renderer blocked long enough to trip a 30 s driver timeout is exactly a single
+`getRpcState()` round trip taking tens of seconds. Both readings were the same
+event seen from different ends.
+
+So the question is now specific and answerable: **what blocks the renderer main
+thread for more than 30 s?** An unresolved Promise cannot do it, so something
+synchronous is running. This spec exercises treesitter-backed structural
+motions with WASM grammars alongside RPC, which is where to look first --
+a synchronous parse or query loop is the shape that fits. The remaining
+measurement is a main-thread profile or a sampling stack at the moment the
+driver's 30 s timer starts, not more environment permutation.
+
 ## The RPC cluster is the WebDriver session dying
 
 Reading the actual error instead of counting passes and failures settles it.
