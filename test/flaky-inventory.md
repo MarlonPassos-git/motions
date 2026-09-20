@@ -591,8 +591,9 @@ node -- returns plain data, and deletes the cursor.
 | `]h`-only reproducer            | 8/16       | **0/16**             |
 | unmodified `rpc-structural-nav` | 29% pooled | **0/16**, 14 passing |
 
-**The same pattern elsewhere, not yet fixed.** Anything that keeps a `Node`
-past a point where a parse can run is exposed:
+**The same pattern elsewhere — audited, and smaller than it first looked.**
+Anything that keeps a `Node` past a point where a parse can run is exposed, but
+tracing the consumers splits them cleanly:
 
 - `src/lua/treesitter/node.ts` — nodes are handed to Lua as userdata and
   retained across Lua calls. This is the worst case: the interval between calls
@@ -605,6 +606,27 @@ past a point where a parse can run is exposed:
   `namedNodeForRange` return nodes into Lua.
 - `src/snippets/context.ts` — holds the result of `getNodeAtPosition`; lower
   risk if consumed immediately, but it is the same class.
+
+**Audit result.** `FilteredCapture.node` is consumed only by
+`src/lua/treesitter/query-api.ts`, so `query.ts`, `language-tree-api.ts` and
+`lua/treesitter/node.ts` are one surface: the Lua `vim.treesitter` API. It is
+opt-in — it runs only if a user's Lua calls it — and it cannot take the fix
+applied here, because nodes _are_ the API. Nodes stay valid for a tree's
+lifetime by tree-sitter's own contract, so raising a Lua error on re-parse would
+break correct user code; the real defect is that the WASM binding caches raw
+addresses, which is upstream. A generation counter would trade a segfault for a
+wrong-but-safe result, and that trade needs a decision rather than a patch.
+
+`src/snippets/context.ts` was the only remaining site reachable without Lua, and
+it is fixed: the fenced-code-block language is now read through a cursor instead
+of `codeBlock.child(i)` in a loop, which allocated repeatedly while the block
+node was still being read.
+
+`hasAncestorOfType` was rewritten to use a cursor and then reverted, because the
+unit tests caught it returning `false` always: `node.walk()` is rooted at that
+node, so `gotoParent()` fails immediately and no ancestor is ever reached. The
+parent chain is also the low-risk shape — it allocates one node and reads it
+straight away rather than retaining several.
 
 `src/fold/metadata.ts` is the counter-example to copy: it extracts readonly
 plain data and retains nothing.

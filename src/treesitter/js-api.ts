@@ -20,6 +20,11 @@ export function getNodeAtPosition(
 }
 
 export function hasAncestorOfType(node: Node, type: string): boolean {
+    // A cursor cannot replace this walk: `node.walk()` is rooted at that node,
+    // so `gotoParent()` returns false immediately and the ancestor is never
+    // reached. The chain is also the low-risk shape -- each step allocates a
+    // node and reads it straight away, rather than retaining several across
+    // later allocations, which is what corrupted the heading walk.
     let current: Node | null = node.parent;
     while (current) {
         if (current.type === type) return true;
