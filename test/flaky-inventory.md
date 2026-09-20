@@ -521,7 +521,47 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
-### Option 3 was implemented and reverted: it exposes a real parity difference
+### What drives the rate is RPC work, not connect cycles
+
+Option 3 was finished and measured. The parity failure it first produced was
+diagnosed rather than papered over: logging both snapshots from the unmodified
+spec gave the original agreed value, `- two` at column 2, which is what the RPC
+side still produced. **The fork side had moved.** The cause was the per-test
+`loadSingleFileWorkspace()` in the old `beforeEach`; without it the fork leaks
+editor state between cases. Restoring it per case made the restructure 14/14
+green with no segfault, and two negative controls confirmed the tests still
+fail: seeding an extra line fails the `before` hook, and corrupting one stored
+snapshot fails exactly that test by name.
+
+Then the campaign came back at **7/16 (44%)** -- worse than the 14-cycle
+baseline it was meant to improve. The restructure had cut connect cycles from 14
+to 2 while adding 14 workspace reloads _while connected_, each forcing a leaf
+change and a full Neovim reseed. Removing those did not rescue it either.
+
+Putting that beside the earlier dose-response measurements:
+
+| cases processed              | segfault runs |
+| ---------------------------- | ------------- |
+| 1                            | 0/16          |
+| 8                            | 4/16 (25%)    |
+| 14                           | ~29%          |
+| 14, restructured to 2 cycles | 7/16 (44%)    |
+
+The earlier reading of this as cycle-dependent was wrong. It tracks the **number
+of cases exercised against a live RPC connection** -- roughly 2% per case,
+linear -- and the number of connect cycles is incidental. That is why 14 cases
+in 2 cycles is no better than 14 cases in 14 cycles.
+
+The consequence is worth stating plainly: **restructuring cannot fix this.**
+Splitting the spec across more files does not reduce total risk either, because
+the same number of cases still runs; it only spreads them over more sessions.
+Per-run flakiness is proportional to RPC work, so the only real lever is the
+per-case defect itself, which remains unexplained.
+
+Option 3 is therefore rejected along with Options 1 and 2, and the deferred
+shutdown stays the only measure that has moved the rate.
+
+### Option 3 was implemented, measured worse, and reverted
 
 The restructure works mechanically. Hoisting the 14 cases into a table, running
 every fork phase in one pass and every RPC phase in the next, cuts the run from
