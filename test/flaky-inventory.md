@@ -521,6 +521,43 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### Fixed, and where the same shape remains
+
+`getAllNodesOfType()` collected `Node` objects into an array during a cursor
+walk and the caller read them afterwards; `headingLevelFromNode()` then called
+`node.child()` on each retained node, allocating again while iterating. Replaced
+with `getNodeSummariesOfType()`, which navigates with the `TreeCursor` alone --
+`nodeType`, `startPosition` and `endPosition` read in place without allocating a
+node -- returns plain data, and deletes the cursor.
+
+| measurement                     | before     | after                |
+| ------------------------------- | ---------- | -------------------- |
+| `]h`-only reproducer            | 8/16       | **0/16**             |
+| unmodified `rpc-structural-nav` | 29% pooled | **0/16**, 14 passing |
+
+**The same pattern elsewhere, not yet fixed.** Anything that keeps a `Node`
+past a point where a parse can run is exposed:
+
+- `src/lua/treesitter/node.ts` — nodes are handed to Lua as userdata and
+  retained across Lua calls. This is the worst case: the interval between calls
+  is unbounded and user config controls it. Reachable from any `vim.treesitter`
+  use.
+- `src/treesitter/query.ts` — captures store `raw.node` into arrays and maps
+  (the `captureMap`, `existing`, `idExisting` paths) and read them after the
+  collection finishes. Same collect-then-read shape as the bug just fixed.
+- `src/lua/treesitter/language-tree-api.ts` — `nodeForRange` and
+  `namedNodeForRange` return nodes into Lua.
+- `src/snippets/context.ts` — holds the result of `getNodeAtPosition`; lower
+  risk if consumed immediately, but it is the same class.
+
+`src/fold/metadata.ts` is the counter-example to copy: it extracts readonly
+plain data and retains nothing.
+
+The general rule worth enforcing: **treat a `Node` as valid only until the next
+tree-sitter call.** Extract what you need immediately, and never store one in a
+collection, a cache, a closure or Lua userdata. An ast-grep rule could catch the
+array/collection case.
+
 ### Located: reading a tree-sitter tree in the renderer during alternation
 
 Bisecting inside `rpc-structural-nav`, which reproduces at a known rate, 16 runs

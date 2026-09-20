@@ -1,5 +1,9 @@
 import type { MotionFn, VimPos } from '../types/vim-api';
-import { isTreeAvailable, getAllNodesOfType } from '../treesitter/js-api';
+import {
+    isTreeAvailable,
+    getNodeSummariesOfType,
+    type NodeSummary,
+} from '../treesitter/js-api';
 
 const HEADING_RE = /^(#{1,6})\s/;
 
@@ -18,11 +22,9 @@ function getHeadingLevel(lineText: string): number {
     return match[1].length;
 }
 
-function headingLevelFromNode(node: import('web-tree-sitter').Node): number {
-    for (let i = 0; i < node.childCount; i++) {
-        const child = node.child(i);
-        if (!child) continue;
-        const idx = HEADING_MARKER_TYPES.indexOf(child.type);
+function headingLevelFromNode(node: NodeSummary): number {
+    for (const childType of node.childTypes) {
+        const idx = HEADING_MARKER_TYPES.indexOf(childType);
         if (idx !== -1) return idx + 1;
     }
     return 0;
@@ -70,25 +72,25 @@ function treesitterHeadingMotion(
     forward: boolean,
     level: number | undefined,
 ): VimPos {
-    const headings = getAllNodesOfType(view, 'atx_heading');
+    const headings = getNodeSummariesOfType(view, 'atx_heading');
     let count = 0;
 
     if (forward) {
         for (const h of headings) {
-            if (h.startPosition.row <= head.line) continue;
+            if (h.startRow <= head.line) continue;
             if (level !== undefined && headingLevelFromNode(h) !== level)
                 continue;
             count++;
-            if (count >= repeat) return { line: h.startPosition.row, ch: 0 };
+            if (count >= repeat) return { line: h.startRow, ch: 0 };
         }
     } else {
         for (let i = headings.length - 1; i >= 0; i--) {
             const h = headings[i]!;
-            if (h.startPosition.row >= head.line) continue;
+            if (h.startRow >= head.line) continue;
             if (level !== undefined && headingLevelFromNode(h) !== level)
                 continue;
             count++;
-            if (count >= repeat) return { line: h.startPosition.row, ch: 0 };
+            if (count >= repeat) return { line: h.startRow, ch: 0 };
         }
     }
 
