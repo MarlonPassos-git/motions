@@ -521,6 +521,43 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### Option 3 was implemented and reverted: it exposes a real parity difference
+
+The restructure works mechanically. Hoisting the 14 cases into a table, running
+every fork phase in one pass and every RPC phase in the next, cuts the run from
+14 connect cycles to **2** -- two rather than one because `setRpcEnabled` is
+what applies `textwidth`, and 12 cases use 80 while 2 use 40.
+
+Two things had to change for it to run at all, and both are worth knowing:
+
+1. The RPC phase relied on **connect-time seeding**. With one connection held
+   across cases, Neovim stays authoritative and still holds the previous case,
+   so `nvim_win_set_cursor` failed with `Invalid cursor line: out of range`
+   whenever the predecessor was shorter. Seeding the buffer explicitly with
+   `nvim_buf_set_lines` fixes that.
+2. Each fork case used to run immediately after `setRpcEnabled(false, tw)`,
+   which reloads features. Repeating that per case inside the fork pass is free,
+   since disconnecting while already disconnected is a no-op.
+
+It reached **13 of 14 passing with no segfault**, and stopped there.
+`matches operator-pending list motion edits` disagrees: `d]l` from `(0, 2)` on
+`- one / \u0020\u0020continuation / - two / - three` gives the fork
+`-two` with the cursor at column 1, and RPC `- two` at column 2. The two agreed
+before the restructure, so one side changed and the evidence does not say which.
+Adding the feature reload back to the fork pass did not move it, which rules out
+the more obvious of the two explanations.
+
+That is a genuine behavioural question -- either the RPC seed is not equivalent
+to connect-time seeding, or the fork leaks state between cases that the old
+per-case reconnect used to wash out -- and the second possibility would be a
+pre-existing bug this spec was hiding. Either way it is not something to settle
+by adjusting the expectation, so the restructure is reverted rather than shipped
+at 13/14.
+
+To resume: re-apply the restructure, then get the original agreed value for that
+one case by logging both snapshots from the unmodified spec. Whichever side
+moved is the one to explain.
+
 ### Pooled rates, and a correction to the arm-by-arm reading above
 
 Sixteen-run arms against a rate near 30% have very wide intervals, and reading
