@@ -521,6 +521,35 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### Pooled rates, and a correction to the arm-by-arm reading above
+
+Sixteen-run arms against a rate near 30% have very wide intervals, and reading
+differences between them -- which the sections above do repeatedly -- was a
+mistake. Pooling every arm by what it actually changed:
+
+| group                                 | runs  | rate    |
+| ------------------------------------- | ----- | ------- |
+| no deferral (raw baseline)            | 24/46 | 52%     |
+| with deferral, any other change       | 28/96 | **29%** |
+| one connect cycle instead of fourteen | 0/16  | **0%**  |
+
+Two results survive pooling. The deferral is real: 28/96 against 24/46, Fisher
+p = 0.008. And a single cycle is real: 0 of 16 against a 29% background is
+p = 0.004. Everything else -- socket transport, resident process, harness-kill
+removal, stubbing the `adoptedStyleSheets` churn -- lands inside the deferral
+group's interval and none of it is distinguishable from any other.
+
+That also corrects the earlier figure in this file: the deferral takes the rate
+to about **29%**, not the 18% recorded from a smaller sample. One arm
+(`adoptedStyleSheets` stubbed) measured 9/16, which looked alarming next to a
+2/16 arm of the same code until both were seen as draws from one ~29%
+distribution.
+
+Also excluded, each on its own: `reloadFeatures()` plus the CM6 reconfiguration
+that follows it, measured without RPC at 14 cycles a run -- **0/12**. So the
+cycle's cost is in the RPC subsystem setup and teardown specifically, not in the
+plugin's feature reload.
+
 ### Three candidate fixes, measured: two rejected, exposure is per-cycle
 
 Each arm is 16 runs of `rpc-structural-nav` in the container, counting runs with
