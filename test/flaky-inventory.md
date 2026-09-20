@@ -521,6 +521,33 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### Open proposal: stop parsing twice while RPC is connected
+
+`enableTreesitterBridge()` is called once from `onload()` and is **not gated on
+the RPC connection**, so while Neovim is connected the same document is parsed
+twice on every change: natively inside Neovim, and again as WASM tree-sitter in
+the renderer.
+
+The motions themselves already use Neovim's copy — under RPC, structural motions
+and Markdown text objects run as buffer-local companion mappings backed by
+Neovim's parsers, and fold state is mirrored back from redraw. The renderer tree
+keeps being maintained anyway, for fold metadata and the syntax-aware JS
+consumers (`code-block`, `blockquote`, `delimiter`, `snippets/context`), which
+already retain regex fallbacks for when the bridge is unavailable.
+
+Worth evaluating on two grounds. It removes duplicated parsing on every
+keystroke while connected. And it removes the WASM heap growth that made the
+retained-node defect reachable in the first place: the crash needed the fork
+walking nodes _while_ RPC-driven parses grew the heap.
+
+What would need checking first: which consumers are genuinely dormant under RPC
+versus still reading the renderer tree, whether fold metadata quality survives
+the fallback, and that the Lua `vim.treesitter` API is unaffected — it keeps its
+own parser cache, separate from the bridge, so user Lua would still need a
+parser regardless.
+
+Note this is defence in depth, not a fix: the defect itself is resolved.
+
 ### The whole RPC cluster is clean after the one fix
 
 `rpc-keys`, `rpc-text-objects`, `rpc-obsidian-bridge` and `rpc-text-sync` run
