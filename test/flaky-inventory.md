@@ -38,14 +38,38 @@ skip on that condition explicitly rather than silently vary.
 | `]3 should jump to next H3`                                                | macOS and Linux | 4                       | **Resolved — product.** `isTreeAvailable()` reports a tree exists; `getAllNodesOfType` returns `[]` for one that is absent, stale or freed, and the motion returned the cursor unmoved with no fallback. Fixed in `src/motions/headings.ts`. |
 | `the animated cursor picks up a shape change (#181)`                       | macOS           | 1                       | Unknown. Fails on its canvas-paint precondition, not on the scroll defect #181 describes.                                                                                                                                                    |
 | `focuses the expected pane in all four directions`                         | macOS           | 3                       | **Focus excluded, three samples.** Latest: `cmFocused` true, focused window, 28-char document, no notices. A test rather than a hook, so possibly distinct from the hook cluster.                                                            |
-| `"after each" hook — RPC key delegation`                                   | macOS           | 1                       | Unknown.                                                                                                                                                                                                                                     |
-| `"after each" hook — RPC structural navigation`                            | Linux           | 2/5 in CI, ~1/3 locally | Unknown. A cascade, not a cause: the session dies in the preceding test.                                                                                                                                                                     |
-| `matches counted operator-pending heading motion edits`                    | Linux           | 1                       | Unknown.                                                                                                                                                                                                                                     |
-| `matches backward operator-pending heading motion edits`                   | Linux           | 2                       | Unknown. Primary failure in the run whose afterEach then cascades.                                                                                                                                                                           |
-| `matches the fork for operators, visual selections, registers, and counts` | Windows         | 1                       | Unknown.                                                                                                                                                                                                                                     |
+| `"after each" hook — RPC key delegation`                                   | macOS           | 1                       | **Resolved — product.** Renderer SIGSEGV from tree-sitter nodes retained across a parse; the hook is a cascade. `rpc-keys` now 0 segfaults in 6 runs on Linux, not re-verified on macOS.                                                     |
+| `"after each" hook — RPC structural navigation`                            | Linux           | 2/5 in CI, ~1/3 locally | **Resolved — product.** The session died from the retained-node SIGSEGV in the preceding test. `rpc-structural-nav` now 0/16 after the fix, from a pooled 29%.                                                                               |
+| `matches counted operator-pending heading motion edits`                    | Linux           | 1                       | **Resolved — product.** A heading motion, which is exactly the retained-node path. 0/16 after the fix.                                                                                                                                       |
+| `matches backward operator-pending heading motion edits`                   | Linux           | 2                       | **Resolved — product.** Same heading-motion path. 0/16 after the fix.                                                                                                                                                                        |
+| `matches the fork for operators, visual selections, registers, and counts` | Windows         | 1                       | **Likely the same cause, unverified.** An RPC text-object spec, which walks the same trees; `rpc-text-objects` is clean on Linux. Never reproduced on Windows, so this is inference, not measurement.                                        |
 | `which-key shows after space press`                                        | Windows         | 1                       | Unknown. Polls 2000 ms for behaviour gated by `operatorshadowtimeout`'s 1000 ms deferral, so the margin is thin by construction.                                                                                                             |
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
+
+## What is still open, after the tree-sitter fix
+
+Ten of the fifteen inventory entries are resolved. The five that are not share
+two properties: **none is an RPC entry**, and **none has ever been reproduced
+locally**, because the container harness is Linux and these are macOS and
+Windows observations.
+
+| Still open                                                    | Platform       | Why it is not closed                                                                                                                                                                    |
+| ------------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `the animated cursor picks up a shape change (#181)`          | macOS          | Fails on its canvas-paint precondition rather than the scroll defect the issue describes. Related to the canvas pair resolved as unfocused-window, but not the same failure.            |
+| `focuses the expected pane in all four directions`            | macOS          | Focus excluded across three samples — `cmFocused` true, focused window, correct document. A test rather than a hook, so not the session-death cascade either.                           |
+| `which-key shows after space press`                           | Windows        | Polls 2000 ms for behaviour gated by `operatorshadowtimeout`'s 1000 ms deferral. The margin is thin by construction, so this is likely a test-design problem rather than a product one. |
+| `a config reload closes an open picker instead of leaking it` | Windows        | One observation, new in `2b6bc75`. Not enough data to characterise.                                                                                                                     |
+| `uses the host jumplist for two cross-note older jumps`       | Windows, Linux | Focus excluded: failed with `cmFocused` true and a correct 19-char document.                                                                                                            |
+
+The honest constraint is the harness. Every measurement in this file after the
+container repro was Linux-only, so the four macOS and Windows entries cannot be
+bisected the same way — they need either CI stress runs, which cost 45 minutes a
+sample, or a macOS/Windows equivalent of the container loop.
+
+Of the five, `which-key` is the one most likely to be a test defect rather than a
+product defect, and it is also the cheapest to settle: raise the poll above the
+deferral it is racing, and see whether it stops failing.
 
 ## What "resolved" means for the two product bugs
 
