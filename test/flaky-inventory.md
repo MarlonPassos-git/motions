@@ -617,8 +617,17 @@ break correct user code; the real defect is that the WASM binding caches raw
 addresses, which is upstream. A generation counter would trade a segfault for a
 wrong-but-safe result, and that trade needs a decision rather than a patch.
 
-`src/snippets/context.ts` was the only remaining site reachable without Lua, and
-it is fixed: the fenced-code-block language is now read through a cursor instead
+Two sites were reachable without Lua, not one. The first claim that
+`snippets/context.ts` was the only one was made from auditing the node-_returning_
+APIs rather than their consumers, and it was wrong: `src/text-objects/blockquote.ts`
+kept the outermost `block_quote` node through a `.parent` walk -- which allocates
+at every step -- and read its start and end rows _after_ the walk finished. That
+is the `aq`/`iq` text object, with no Lua and no RPC involved. It now reads both
+rows from each candidate as it is encountered and retains only numbers.
+`code-block.ts` and `delimiter.ts` were checked in the same pass and are clean;
+both read into plain data immediately.
+
+`src/snippets/context.ts` is the other one, also fixed: the fenced-code-block language is now read through a cursor instead
 of `codeBlock.child(i)` in a loop, which allocated repeatedly while the block
 node was still being read.
 
