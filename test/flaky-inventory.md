@@ -521,6 +521,38 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### It needs fork work and RPC work alternating, which a user does not do
+
+Building a session workload up one ingredient at a time, each 8 runs in the
+container, all with a single connection unless noted:
+
+| workload                                                     | segfault runs |
+| ------------------------------------------------------------ | ------------- |
+| 1,200 RPC requests, simple edits                             | 0/2 runs      |
+| 40 note switches + edits, 1 connect                          | **0/8**       |
+| 40 structural-motion batches (`]h`, `d]l`, `gqG`), 1 connect | **0/8**       |
+| structural motions + 14 connect/disconnect cycles            | **0/8**       |
+| the same, **plus fork-driven editing between RPC periods**   | **3/8**       |
+
+Only the last one crashes, and the only thing it adds is renderer-side work
+through the bundled fork -- `setupEditor` plus `vimHandleKeysSync` -- in the
+window while RPC is disconnected. So the requirement is **fork activity and RPC
+activity alternating in one session**, not traffic, not note switching, not
+structural motions, not connect cycles, and not any of them in isolation.
+
+That is exactly what a parity spec does and exactly what a person does not. The
+specs alternate fourteen times per file because comparing the two engines is
+their entire purpose. A user runs one engine or the other.
+
+It also explains the absence of user reports: the backend is opt-in and
+desktop-only, and a session that enables it and works stays on the measured-clean
+side -- 320 note switches, 320 structural-motion batches and 1,200 requests, all
+without a single segfault.
+
+The risky pattern for a user is narrow: disable the backend, edit with the
+bundled fork, re-enable it, and repeat. Once or twice is unlikely to hit a rate
+of a few percent per alternation; a habit of toggling mid-session is what would.
+
 ### What drives the rate is RPC work, not connect cycles
 
 Option 3 was finished and measured. The parity failure it first produced was

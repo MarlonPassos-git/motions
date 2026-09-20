@@ -43,9 +43,18 @@ process — `UtilityProcess` exists for exactly this, and spawning subprocesses 
 documented as work to delegate to the main process. An Obsidian plugin has no
 access to either, so the backend must spawn Neovim from the renderer.
 
-Practical impact: a normal session connects once, so exposure is roughly one
-disconnect. Toggling the backend repeatedly within a session raises the risk.
-Enabling the backend is opt-in and desktop-only.
+Practical impact is narrower than the CI rate suggests. Building the workload up
+one ingredient at a time showed that RPC work alone does not crash: 40 note
+switches with editing, 40 structural-motion batches (`]h`, `d]l`, `gqG`), 1,200
+requests, and even 14 connect/disconnect cycles each measured **0 segfaults in 8
+runs**. It only reproduces when editing through the **bundled fork** is
+interleaved with RPC work in the same session, which measured 3 of 8.
+
+That is what a parity spec does -- alternating the two engines fourteen times per
+file is its purpose -- and what a person does not. A session that enables the
+backend and works stays on the measured-clean side. The risky pattern is
+disabling the backend, editing with the bundled fork, re-enabling it, and
+repeating. Enabling the backend is opt-in and desktop-only.
 
 ### ~~Neovim popup-menu completion is not displayed in RPC mode~~ (Fixed)
 
