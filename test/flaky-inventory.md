@@ -47,6 +47,37 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
 
+## Reproduction attempt on Linux: none of the five reproduce
+
+All four specs owning the five open entries — `cursor-shapes-runtime`,
+`rpc-obsidian-bridge`, `lua-space-leader`, `lua-vim-ui` — run ten times in the
+container: **530 test executions, 0 failures, 0 segfaults**.
+
+What that does and does not establish. Ten clean runs bound the rate below about
+26% at 95% confidence, and these entries were each observed one to three times
+across many CI runs, so their real rate is single-digit percent. **Ten runs
+cannot distinguish fixed from rare, and for four of the five the platform is
+wrong anyway.** Treat this as "does not reproduce on Linux at ten samples",
+which is weaker than unreproducible.
+
+Two corrections came out of it. `focuses the expected pane in all four
+directions` and `uses the host jumplist for two cross-note older jumps` both
+live in **`rpc-obsidian-bridge.e2e.ts`**, so the earlier claim that no open
+entry is an RPC entry was wrong. That spec has now run 16 times clean (6 in the
+cluster check, 10 here) since the tree-sitter fix, which is the most likely
+explanation for both.
+
+`which-key shows after space press` is settled by reading rather than sampling.
+`waitForWhichKey` allowed 2000 ms while `operatorshadowtimeout` defaults to
+1000 ms, and `<Space>` is a prefix, so the overlay cannot appear until the
+deferral expires. The real budget was 1000 ms, polled at 100 ms plus a round
+trip. The default is now 5000 ms, measured past the deferral. This is a test
+defect, not a product one — the overlay was never late, the assertion was early.
+
+That leaves three genuinely open, all needing a platform the container cannot
+provide: `#181` and `focuses the expected pane` on macOS, `a config reload
+closes an open picker` on Windows.
+
 ## What is still open, after the tree-sitter fix
 
 Ten of the fifteen inventory entries are resolved. The five that are not share

@@ -721,7 +721,16 @@ export async function hasWhichKeyOverlay(): Promise<boolean> {
     })) as boolean;
 }
 
-export async function waitForWhichKey(timeout = 2000): Promise<void> {
+/**
+ * The budget has to be measured from *after* the deferral, not from the
+ * keypress. `<Space>` is a prefix, so the overlay cannot appear until
+ * `operatorshadowtimeout` expires — 1000 ms by default — which left the old
+ * 2000 ms default with 1000 ms of real margin, polled at 100 ms plus an
+ * `executeObsidian` round trip each time. That is thin by construction on a
+ * loaded runner, and `which-key shows after space press` is a standing Windows
+ * flake in test/flaky-inventory.md.
+ */
+export async function waitForWhichKey(timeout = 5000): Promise<void> {
     await browser.waitUntil(
         async () =>
             (await browser.executeObsidian(
