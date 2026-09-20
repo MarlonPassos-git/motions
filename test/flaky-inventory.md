@@ -521,6 +521,22 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### The beforeSuite vim-mode cycle is not the cause either
+
+`wdio.conf.mts` cycles vim mode once per spec file -- `disable-vim-mode`, pause,
+`enable-vim-mode`, pause -- which is a full `teardownVimSubsystems` and
+`setupVimSubsystems`, destroying and recreating every editor extension including
+the treesitter bridge. A reasonable suspect for specs that already alternate
+engines.
+
+Skipping it for `rpc-` specs measured **9/16**, against a pooled 29%. No
+improvement, so it is not a contributor and the skip was reverted rather than
+drop the toggle canary for nothing.
+
+Worth noting the spread while reading any single arm in this file: with the same
+code, arms have landed at 2/16, 3/16, 5/16, 8/16 and 9/16. The pooled figure is
+the only one worth quoting.
+
 ### Prevention attempt: deferring the RPC reconcile does not help
 
 `reloadFeatures()` starts the async RPC reconcile and then synchronously rebuilds
