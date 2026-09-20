@@ -521,6 +521,28 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### The whole RPC cluster is clean after the one fix
+
+`rpc-keys`, `rpc-text-objects`, `rpc-obsidian-bridge` and `rpc-text-sync` run
+together, six times, with the node-retention fix in place: **47 passing per run,
+0 failing, 0 segfaults**, 282 test executions in total. Together with
+`rpc-structural-nav` at 0/16, the cluster that opened this file is resolved by a
+single change.
+
+That is also the answer to why so many unrelated-looking specs failed: they all
+drive structural heading motions somewhere, and every one of them was walking
+the same retained-node path.
+
+**Still only identified by shape, not measured.** The four remaining sites in
+the section below have not been shown to crash; they are the same pattern in
+code. `src/lua/treesitter/node.ts` is the one to take seriously, and it needs a
+design decision rather than the fix applied here: the Lua API hands out `TSNode`
+userdata with 31 methods, so it cannot simply return plain data. Invalidating
+outstanding node handles when a parse runs -- a generation counter checked on
+every method -- is the shape that fits, and it is a real change rather than a
+tidy-up. `src/treesitter/query.ts` has the same constraint, since its captures
+feed that API.
+
 ### Fixed, and where the same shape remains
 
 `getAllNodesOfType()` collected `Node` objects into an array during a cursor
