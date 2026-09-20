@@ -365,6 +365,7 @@ export default class VimMotionsPlugin extends Plugin {
     private initializing = true;
     private vimExtensionSlot: Extension[] = [];
     private treesitterExtensionSlot: Extension[] = [];
+    private buildTreesitterBridge: (() => Extension) | null = null;
     private animatedCursorSlot: Extension[] = [];
     private undoTreeSlot: Extension[] = [];
     private snippetCompletionSlot: Extension[] = [];
@@ -736,10 +737,9 @@ export default class VimMotionsPlugin extends Plugin {
 
             const { createBridgeExtension } =
                 await import('./treesitter/bridge');
-            this.treesitterExtensionSlot.push(
-                createBridgeExtension('markdown'),
-            );
-            this.app.workspace.updateOptions();
+            this.buildTreesitterBridge = () =>
+                createBridgeExtension('markdown');
+            this.applyTreesitterBridgeSlot();
         } catch (err) {
             console.warn(
                 'Vim Motions: treesitter bridge unavailable; ' +
@@ -3251,6 +3251,32 @@ export default class VimMotionsPlugin extends Plugin {
      * recreate the plugin — and any live state it holds — on every unrelated
      * settings change.
      */
+    /**
+     * Neovim parses the same document natively while RPC is connected, so
+     * keeping this bridge alive parses every change twice. The renderer
+     * consumers of its tree are dormant then -- structural motions and Markdown
+     * text objects run as companion mappings inside Neovim, and fold state is
+     * mirrored back from redraw -- so the second parse buys nothing.
+     *
+     * It also removes the WASM heap growth that made retained tree-sitter nodes
+     * reachable: a node holds an address into linear memory, and a parse that
+     * grows it moves the buffer. That defect is fixed at the call sites, so this
+     * is defence in depth rather than the fix.
+     */
+    applyTreesitterBridgeSlot(): void {
+        const build = this.buildTreesitterBridge;
+        if (!build) return;
+        const wanted = !this.neovimConnection.isConnected();
+        if (wanted === this.treesitterExtensionSlot.length > 0) return;
+        this.setSlotEnabled(
+            this.treesitterExtensionSlot,
+            'treesitterBridge',
+            wanted,
+            build,
+        );
+        this.app.workspace.updateOptions();
+    }
+
     private setSlotEnabled(
         slot: Extension[],
         key: string,
@@ -3856,6 +3882,7 @@ export default class VimMotionsPlugin extends Plugin {
                 if (!this.neovimConnection.isConnected()) return;
                 await this.markToggleInFlight(true);
                 await this.neovimConnection.disconnect();
+                this.applyTreesitterBridgeSlot();
                 return;
             }
             const state = this.neovimConnection.getState();
@@ -3875,6 +3902,7 @@ export default class VimMotionsPlugin extends Plugin {
             }
             await this.markToggleInFlight(true);
             await this.neovimConnection.disconnect();
+            this.applyTreesitterBridgeSlot();
             if (
                 operation !== this.neovimReconcileOperation ||
                 !this.settings.vimEnabled ||
@@ -3886,6 +3914,7 @@ export default class VimMotionsPlugin extends Plugin {
                 configPath,
                 this.settings.textwidth,
             );
+            this.applyTreesitterBridgeSlot();
         }
     }
 

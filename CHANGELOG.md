@@ -65,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Neovim RPC frontmatter handling supports both properties modes** — removes the Source-only connection refusal. Source frontmatter remains fully navigable; rendered frontmatter receives a dedicated-window `foldmethod=expr` fold using the same start-of-document delimiter rule as CodeMirror, and post-key cursor synchronization resolves `foldclosed()` positions to the first body line. Property-widget focus remains owned by Obsidian, while API edits can still update the complete folded document.
     - Plugin: `src/fold/frontmatter.ts`, `src/fold/provider.ts`, `src/rpc/frontmatter-fold.ts`, `src/rpc/document-sync.ts`, `src/rpc/key-delegation.ts`, `src/rpc/neovim-connection.ts`
 
+- **The renderer no longer parses Markdown while the Neovim backend is connected** — Neovim parses the same document natively, and the renderer consumers of its tree are dormant then: structural motions and Markdown text objects run as companion mappings inside Neovim, and fold state is mirrored back from redraw. The tree-sitter bridge now tracks the connection, so a connected session parses each change once instead of twice. It also removes the WASM heap growth that made retained tree-sitter nodes reachable — defence in depth, since that defect is fixed at the call sites. Verified both ways: 34 RPC tests pass with the bridge off, 33 non-RPC tests pass with it on.
+    - Plugin: `src/main.ts`
+
 ### Fixed
 
 - **RPC fold expression no longer rescans the complete document for every queried line** — the window-local Markdown `foldexpr` previously fetched and rescanned all lines on each invocation, making an edit on a 2,004-line note effectively quadratic and pushing measured RPC operator latency to 145.9 ms p95. It now computes one linear fold-level table per Neovim `changedtick` and reuses it for the remaining fold queries.

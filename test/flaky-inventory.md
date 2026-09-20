@@ -521,7 +521,7 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
-### Open proposal: stop parsing twice while RPC is connected
+### Implemented: the renderer stops parsing while RPC is connected
 
 `enableTreesitterBridge()` is called once from `onload()` and is **not gated on
 the RPC connection**, so while Neovim is connected the same document is parsed
@@ -546,7 +546,14 @@ the fallback, and that the Lua `vim.treesitter` API is unaffected — it keeps i
 own parser cache, separate from the bridge, so user Lua would still need a
 parser regardless.
 
-Note this is defence in depth, not a fix: the defect itself is resolved.
+Implemented and verified both ways: with the bridge gated on the connection, 34
+RPC tests pass with it off (including `rpc-folds-undo`, the fold-metadata case
+that was the main worry) and 33 non-RPC tests pass with it on (including
+`fold-providers` and `navigation`, which need the tree). So the consumers really
+are dormant under RPC, which was the assumption worth checking.
+
+This is defence in depth, not the fix: the defect itself is resolved at the call
+sites.
 
 ### The whole RPC cluster is clean after the one fix
 
