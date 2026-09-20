@@ -521,6 +521,54 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### Located: reading a tree-sitter tree in the renderer during alternation
+
+Bisecting inside `rpc-structural-nav`, which reproduces at a known rate, 16 runs
+per arm:
+
+| fork phase does                                               | segfault runs |
+| ------------------------------------------------------------- | ------------- |
+| nothing (document replaced only)                              | **0/16**      |
+| one trivial key (`x`)                                         | **0/16**      |
+| `]h` only                                                     | **8/16**      |
+| `]h`, with all 12 tree-sitter handle frees neutralised        | 8/16          |
+| `]h`, with incremental `tree.edit()` disabled (full re-parse) | 7/16          |
+| `]h`, with `getTreeForView` forced to null                    | **0/16**      |
+
+Replacing the document is harmless; dispatching a trivial key is harmless. One
+treesitter-backed motion reproduces it. And the thing that has to happen is the
+**read**: forcing every renderer tree-sitter consumer onto its fallback takes
+8/16 to 0/16, p ≈ 0.0015% against a 50% arm.
+
+Two mechanisms are excluded at that same power, both of which this file had
+previously guessed at:
+
+- **Not handle lifetime.** With nothing ever freed, it still crashed 8/16. The
+  earlier dismissal of this was at n = 4 and worth nothing; this one is not.
+- **Not incorrect incremental edits.** Full re-parse on every change still
+  crashed 7/16.
+
+So a tree that is alive and correctly parsed still faults when walked. The
+remaining candidate that fits every observation is **web-tree-sitter node
+pointers outliving a WASM heap move**: nodes are JS objects holding addresses
+into WASM linear memory, and a parse that grows that memory replaces the backing
+buffer, leaving any retained node pointing into a detached one. That produces
+exactly the recorded fault -- a read at `base + garbage_u32`, in JIT code, with
+no JavaScript frame -- and it explains why neutralising frees made no
+difference, since leaking trees makes growth _more_ likely, not less.
+
+It also explains the alternation requirement: the fork phase walks nodes while
+the RPC phase drives enough parsing to grow the heap.
+
+Note what the codebase already does correctly here: `src/fold/metadata.ts`
+extracts readonly plain-data ranges and titles rather than retaining nodes. The
+heading motion's `getAllNodesOfType` returns nodes instead, and holds them.
+
+Next step is a fix rather than another bisect: have tree consumers extract plain
+data (positions, types, text) immediately and never retain a node across
+anything that can parse or allocate. `]h` is the reproducer to verify against --
+8/16 before, and the fix has to take that to 0/16.
+
 ### The beforeSuite vim-mode cycle is not the cause either
 
 `wdio.conf.mts` cycles vim mode once per spec file -- `disable-vim-mode`, pause,
