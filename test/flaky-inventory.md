@@ -521,6 +521,21 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### Prevention attempt: deferring the RPC reconcile does not help
+
+`reloadFeatures()` starts the async RPC reconcile and then synchronously rebuilds
+the extension slots and reconfigures CodeMirror, so ViewPlugins are destroyed and
+recreated while an RPC connect or disconnect is still in flight. Deferring the
+reconcile past the synchronous reload measured **8/16**, against a pooled 28/96
+(29%) for the deferral baseline -- no improvement, and if anything worse
+(Fisher p = 0.09). Reverted, since it changes toggle semantics for nothing.
+
+A separate attempt to test a settle at the engine transition measured nothing:
+the synthetic reproducer built for it dropped the note-switching the 3/8 version
+had and came back 0/8, so there was no signal to move. Prevention experiments
+have to run against `rpc-structural-nav`, which is the only workload that
+reproduces at a usable rate.
+
 ### It needs fork work and RPC work alternating, which a user does not do
 
 Building a session workload up one ingredient at a time, each 8 runs in the

@@ -142,6 +142,13 @@ export interface VimMotionsSettings {
     ripgrepArgs: string;
     grepMode: 'ripgrep' | 'grep';
     neovimRpcEnabled: boolean;
+    /**
+     * Set while an RPC connect or disconnect is in flight and cleared once it
+     * settles. Surviving a restart means the renderer died mid-toggle, which is
+     * the one pattern known to segfault it, so the next start can say so
+     * instead of leaving an unexplained lost window.
+     */
+    neovimToggleInFlight: boolean;
     neovimBinaryPath: string;
     neovimConfigPath: string;
     frecencyData?: Record<string, { count: number; timestamps: number[] }>;
@@ -294,6 +301,7 @@ export const DEFAULT_SETTINGS: VimMotionsSettings = {
     ripgrepArgs: '--smart-case --glob "*.md"',
     grepMode: 'ripgrep' as const,
     neovimRpcEnabled: false,
+    neovimToggleInFlight: false,
     neovimBinaryPath: '',
     neovimConfigPath: '',
     frecencyData: undefined,

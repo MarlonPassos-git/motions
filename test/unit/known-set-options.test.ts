@@ -35,6 +35,9 @@ const EXCLUDED_SETTINGS_KEYS = new Set([
     'frecencyData',
     'persistedUndoTrees',
     'persistedImState',
+    // Crash breadcrumb: written around an RPC toggle so the next start can tell
+    // the user the renderer died mid-switch. Meaningless to set by hand.
+    'neovimToggleInFlight',
 
     // Meta — controls the config system itself (circular to set from config)
     'configMode',

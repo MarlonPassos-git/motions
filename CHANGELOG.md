@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Neovim RPC status-bar mode ownership (M8d)** — routes `msg_showmode` into the existing status bar, gives the externally supplied Neovim mode precedence over fork events while RPC is connected, and restores fork-driven mode text on disconnect.
     - Plugin: `src/rpc/mode-status.ts`, `src/rpc/neovim-connection.ts`, `src/vim/mode-tracker.ts`, `src/main.ts`
 
+- **Neovim backend crash breadcrumb** — a persisted `neovimToggleInFlight` marker is written before a real RPC connect or disconnect and cleared once it settles, so a marker that survives a restart means the renderer died mid-switch. The next start clears it and explains what happened instead of leaving an unexplained lost window. The renderer crash itself cannot be caught in-process: the plugin's JavaScript dies with the renderer, and Electron's `UtilityProcess` is unavailable to plugins. Scoped to real transitions — a reload that neither connects nor disconnects writes nothing.
+    - Plugin: `src/main.ts`, `src/settings.ts`
+
 ### Changed
 
 - **The bundled vim fork's own type declarations are used** — `src/types/codemirror-vim.d.ts` declared `Vim` as `Record<string, unknown>`, shadowing the 166 members the fork's shipped `.d.ts` exports and reducing every `Vim.*` access across the 19 files that import it to `unknown`. All 15 fork-specific exports it hand-declared (`foldopenAnnotation`, `setCursorSuppressed`, `setKeyInterceptActive`, …) were already shipped, so deleting it reports zero errors in `src/` and `test/` while restoring real checking. The casts that erasure forced are gone: `escape-guard.ts` now calls `Vim.setIdleEscapeCallback` directly, and the demand harness calls `Vim.map`/`unmap`/`getOperatorfunc` without a hand-written view. `getBundledVimApi()` keeps its conversion — the plugin's own `VimApi` interface genuinely does not overlap the fork's shape.

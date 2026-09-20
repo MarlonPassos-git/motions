@@ -56,6 +56,15 @@ backend and works stays on the measured-clean side. The risky pattern is
 disabling the backend, editing with the bundled fork, re-enabling it, and
 repeating. Enabling the backend is opt-in and desktop-only.
 
+There is no in-process recovery: this is a renderer-process SIGSEGV, so the
+plugin's own code dies with the window and nothing of ours runs afterwards.
+Electron's answer is `UtilityProcess`, which a plugin cannot reach. What the
+plugin does instead is leave a breadcrumb — a marker written before a real
+connect or disconnect and cleared once it settles — so a restart that finds it
+still set reports that the renderer died mid-switch rather than leaving the
+crash unexplained. Notes are unaffected: the mirror is `acwrite` and Obsidian
+owns the file.
+
 ### ~~Neovim popup-menu completion is not displayed in RPC mode~~ (Fixed)
 
 The attached UI requests `ext_messages`, `ext_cmdline`, and `ext_popupmenu`. M8a routes messages, M8b renders the external command line, and M8c renders popup-menu items, selection updates, and teardown. `grid=-1` completion is anchored to the command line with byte-position conversion; insert completion uses reported grid cells and CM6 metrics. Grid drawing events remain intentionally discarded.

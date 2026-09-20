@@ -775,6 +775,19 @@ export default class VimMotionsPlugin extends Plugin {
             () => this.modeTracker,
         );
         await this.loadSettings();
+        // A marker that survived a restart means the renderer died while the
+        // Neovim backend was being switched on or off. That is the one pattern
+        // measured to segfault it, and nothing of ours runs after the crash, so
+        // this is the first opportunity to say what happened rather than leave
+        // an unexplained lost window.
+        if (this.settings.neovimToggleInFlight) {
+            this.settings.neovimToggleInFlight = false;
+            await this.saveSettings();
+            new Notice(
+                'Vim Motions: Obsidian closed unexpectedly while the Neovim backend was being switched. Your notes are unaffected. Switching the backend repeatedly in one session is the known trigger.',
+                15000,
+            );
+        }
         this.activeUndoFilePath =
             this.app.workspace.getActiveFile()?.path ?? null;
         if (this.settings.enableUndoTree) {
@@ -3808,7 +3821,40 @@ export default class VimMotionsPlugin extends Plugin {
         const binaryPath = this.settings.neovimBinaryPath;
         const configPath = this.settings.neovimConfigPath;
         void (async () => {
+            try {
+                await this.reconcileNeovimConnectionInner(
+                    operation,
+                    shouldConnect,
+                    binaryPath,
+                    configPath,
+                );
+            } finally {
+                await this.markToggleInFlight(false);
+            }
+        })();
+    }
+
+    /**
+     * Persisted around the toggle rather than after it: if the renderer dies in
+     * between, nothing of ours runs again, so the flag has to already be on
+     * disk for the next start to find it.
+     */
+    private async markToggleInFlight(active: boolean): Promise<void> {
+        if (this.settings.neovimToggleInFlight === active) return;
+        this.settings.neovimToggleInFlight = active;
+        await this.saveSettings();
+    }
+
+    private async reconcileNeovimConnectionInner(
+        operation: number,
+        shouldConnect: boolean,
+        binaryPath: string,
+        configPath: string,
+    ): Promise<void> {
+        {
             if (!shouldConnect) {
+                if (!this.neovimConnection.isConnected()) return;
+                await this.markToggleInFlight(true);
                 await this.neovimConnection.disconnect();
                 return;
             }
@@ -3827,6 +3873,7 @@ export default class VimMotionsPlugin extends Plugin {
                 );
                 return;
             }
+            await this.markToggleInFlight(true);
             await this.neovimConnection.disconnect();
             if (
                 operation !== this.neovimReconcileOperation ||
@@ -3839,7 +3886,7 @@ export default class VimMotionsPlugin extends Plugin {
                 configPath,
                 this.settings.textwidth,
             );
-        })();
+        }
     }
 
     private rebuildExSuggest(): void {
