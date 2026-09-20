@@ -521,6 +521,60 @@ count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
 growth, the whole tree-sitter use-after-free class, and oversized positions.
 
+### Three candidate fixes, measured: two rejected, exposure is per-cycle
+
+Each arm is 16 runs of `rpc-structural-nav` in the container, counting runs with
+a fresh `dmesg` segfault.
+
+| arm                                                           | segfault runs  |
+| ------------------------------------------------------------- | -------------- |
+| raw baseline, before the deferral                             | 24/46 (52%)    |
+| **deferred shutdown (shipped)**                               | **2/16 (13%)** |
+| deferred + no per-test harness kill                           | 3/16 (19%)     |
+| Option 1: socket transport (`--listen`, no stdio pipes)       | 4/16 (25%)     |
+| Option 2: resident Neovim, real reuse (`spawn=1`, zero kills) | 5/16 (31%)     |
+
+**Option 1 is rejected.** Replacing stdio pipes with a Unix socket did not move
+the rate, and it is worse in one respect: with `--listen` Neovim does not exit
+when the socket closes, so a renderer crash orphans it -- two of the sixteen
+runs leaked an `nvim`. `--embed` over stdio exits on channel close, which is a
+property worth keeping.
+
+**Option 2 is rejected, and it is the most informative result here.** Parking
+the process on disable and adopting it on enable needed two supporting changes:
+`decorations.ts` must keep the UI attached (`--embed` Neovim exits when its last
+UI detaches, which is why the first attempt silently never reused anything --
+`adopt=0`, verified by tracing), and an adopted session must wipe its buffers or
+the parity tests fail on stale state. With those, a run is one spawn, thirteen
+adoptions and zero kills. **It still crashed 5 of 16.** So the crash requires
+neither spawning nor killing Neovim, and every process-lifetime theory in this
+file -- including the one the shipped mitigation is built on -- is wrong about
+the mechanism.
+
+A harness confound turned up on the way. `rpc-structural-nav`'s `afterEach`
+SIGKILLed every spawned Neovim from the wdio Node process, so in **every** arm
+measured before this the child died externally 14 times a run regardless of what
+the product did. Moving it to a suite-level sweep changed nothing (3/16), so it
+was not the cause, but it does mean the earlier "never kill" and "retain" arms
+never tested what they claimed to.
+
+**Exposure is per-cycle, and that is the one lever that works:**
+
+| cycles per run | segfault runs    |
+| -------------- | ---------------- |
+| 1              | **0/16**         |
+| 8              | 4/16 (25%)       |
+| 14             | ~19% across arms |
+
+That fits a constant per-cycle risk of roughly 2-4%. A spec that connects once
+instead of fourteen times should therefore be roughly an order of magnitude less
+flaky, without touching the product. For a user, one enable/disable in a session
+carries that same few-percent risk.
+
+What a cycle still contains, after everything excluded: the plugin's own
+subsystem teardown and setup, `reloadFeatures()`, and the CM6 reconfiguration
+that follows. Not the process, not the transport, not the message handlers.
+
 ### The teardown bisect: what moves the rate and what does not
 
 Every arm is `rpc-structural-nav` in the container, counting runs that produced
