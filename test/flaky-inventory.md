@@ -195,6 +195,135 @@ timeout inside `setRpcEnabled`, which is consistent with a dead renderer but
 is not proof of `SIGSEGV`. And the probe reads its own buffer, so it reports
 growth of the heap tree-sitter uses — not renderer memory generally.
 
+## ROOT CAUSE: a leaked `TreeCursor` and `web-tree-sitter`'s FinalizationRegistry
+
+The fix works. It does **not** work for the reason recorded, and "retaining
+nodes across a parse" is not the mechanism. Measured, not argued.
+
+`getAllNodesOfType` did two things wrong, and the replacement changed both: it
+retained `Node` objects, **and it never called `cursor.delete()`**. Every
+account in this file blamed the first. A 2x2 separates them — each arm is
+`rpc-structural-nav` in the container, counting fresh `dmesg` segfaults:
+
+| arm                | retains `Node`s | leaks cursor | segfaults     |
+| ------------------ | --------------- | ------------ | ------------- |
+| pre-fix (original) | yes             | yes          | 8/16 (50%)    |
+| **leak only**      | **no**          | yes          | **5/8 (63%)** |
+| **retention only** | yes             | **no**       | **0/6**       |
+| shipped fix        | no              | no           | 0/16          |
+
+The leaked cursor is **necessary and sufficient**. Retention is neither: with
+the cursor freed, the original retaining walk ran 6/6 clean at 14 passing. And
+the leak-only arm reproduces the recorded fingerprint exactly —
+`segfault at 12cd7fffffff`, `717fffffff`, `9a17fffffff`, every one
+`base + 0x7fffffff`, every one at code offset `...b57`, the same JIT site as
+the original cores.
+
+The pathway is in `web-tree-sitter` and it is not subtle once seen:
+
+```js
+var finalizer3 = newFinalizer((address) => {
+    C._ts_tree_cursor_delete_wasm(address); // address === this.tree[0]
+});
+constructor(internal, tree) {
+    finalizer3?.register(this, this.tree[0], this); // holds the TREE pointer
+}
+delete() {
+    finalizer3?.unregister(this); // the operative line of the fix
+    ...
+}
+```
+
+A cursor registers itself with a `FinalizationRegistry` **holding the tree's
+pointer, not its own**. Drop the cursor without `delete()` and it stays
+registered. The bridge then re-parses and calls `previous.delete()`, freeing
+that tree. Later, at a GC-determined moment, V8 collects the orphaned cursor
+and fires the finalizer against the dangling tree pointer — a use-after-free
+inside the WASM allocator, executed from a GC callback in JIT code.
+
+That accounts for every observation this file collected:
+
+- **Nondeterministic at ~50%** — it needs a GC at the wrong moment.
+- **Requires RPC, and specifically fork/RPC alternation** — the fork walk leaks
+  the cursor, while RPC drives both the re-parses that free trees and the
+  allocation churn that triggers GC. Neither side alone does it.
+- **`getTreeForView` forced null was 0/16** — no walk, so no cursor is ever
+  constructed or registered.
+- **The heap never grows** — irrelevant to a use-after-free at a live address.
+- **The fault is V8-level in JIT code, not a WASM bounds trap** — it is a GC
+  finalizer callback corrupting allocator state, which then surfaces elsewhere.
+
+### The arm that misled the entire investigation
+
+> `]h`, with all 12 tree-sitter handle frees neutralised | 8/16
+
+This was read as "with nothing freed at all a use-after-free is impossible",
+and it is what retired the whole use-after-free class. **It is invalid.**
+Neutralising our twelve `.delete()` call sites does not disable
+`FinalizationRegistry`; GC keeps freeing every dropped handle through
+`finalizer2`/`finalizer3` regardless. That arm never achieved "nothing is ever
+freed", which is exactly why the rate did not move. The correct reading is the
+opposite of the one taken: it is evidence _for_ the finalizer path, because
+removing our frees leaves the GC frees untouched.
+
+### Unfixed surface
+
+The severity of a dropped handle is now **a latent GC-timed use-after-free,
+not a leak**. Both `.walk()` sites currently free in a `finally`
+(`js-api.ts`, `snippets/context.ts`), so the cursor class is closed. What
+remains:
+
+- `lua/treesitter/api.ts` `get_string_parser` parses a tree and hands it to Lua
+  through `pushTSTree` with **no owner**. It is freed only when GC collects it.
+- Any `Tree`, `Query` or `Parser` dropped without `delete()` anywhere is the
+  same shape. The three defects fixed alongside this investigation — the
+  `query.parse()` wrapper, `parserCache` and `ltreeCache` — were all in this
+  class, which makes them considerably more than tidiness.
+- A pattern gate for "handle allocated, never deleted" is the durable answer;
+  `.walk()` without a matching `delete()` is the narrow version.
+
+### Re-measured: the disconnect crash is gone too
+
+`rpc-structural-nav` is the spec that measured 24 of 46 (52%) before the
+deferred-teardown mitigation and ~29% after it. On current master — cursor
+freed, mitigation still in place — it measures **0 segfaults and 0 failing runs
+in 16**, every run 14 passing. Against its own 29% post-mitigation rate that is
+p ≈ 0.004; against the 52% baseline, p ≈ 1e-5.
+
+So the `KNOWN_LIMITATIONS` entry for the RPC disconnect crash and this
+tree-sitter crash were the **same defect**, which is what the shared
+`base + 0x7fffffff` fingerprint was saying all along. The entry is marked fixed.
+
+One consequence worth stating plainly: the deferred-teardown mitigation was
+adopted on 24/46 versus 7/38, Fisher p = 0.002 — but **both arms contained the
+leak**, so that comparison was confounded. It has now been decided empirically.
+Three teardown shapes on current master, 16 container runs each:
+
+| teardown                                          | segfaults | historical |
+| ------------------------------------------------- | --------- | ---------- |
+| 3-second deferred `SIGTERM` (the mitigation)      | **0/16**  | ~29%       |
+| synchronous `qa!` + await `'close'` (pre-b8bab58) | **0/16**  | 24/46, 52% |
+| immediate non-blocking `SIGTERM` (now shipped)    | **0/16**  | n/a        |
+
+48 runs, 0 segfaults. The synchronous arm is the decisive one: it is the exact
+configuration that measured 52%, and it is now clean, p ≈ 1e-5. So the
+mitigation was never load-bearing and the 3x reduction was noise or a timing
+side effect, not a fix.
+
+The deferral is therefore removed. What is kept is the non-blocking shape,
+which is better independently — disconnect returns immediately rather than
+blocking up to four seconds — and which is also _less_ code than the
+synchronous version it replaced, so reverting to the latter would have been a
+regression in both responsiveness and complexity.
+
+### What is still not established
+
+The step from "finalizer frees a dangling tree pointer" to "V8 faults at
+`base + 0xffffffff` in JIT code" is inferred, not measured. Allocator
+corruption surfacing later fits, and the toggle is decisive (5/8 against 0/6),
+but the intermediate state was never observed. Do not write that step up as
+established.
+
 ## Recommendation on the Lua TSNode question: not a generation counter
 
 Reading `api.ts` changes the diagnosis. Line 122 does `if (oldTree)
@@ -828,7 +957,7 @@ conclusion. Every fault address has the form
 `base + 0x7fffffff`, the signature of `kMaxInt` reaching a memory access as an
 index or length.
 
-Refuted by experiment, not by argument: **the entire use-after-free class**.
+~~Refuted by experiment, not by argument: **the entire use-after-free class**.~~
 First all six tree frees were neutralised and the bundle rebuilt -- 2 of 4 runs
 still segfaulted. That test was incomplete, because queries and parsers are
 freed too and `named-queries.ts` invalidates queries by revision at runtime, so
@@ -836,6 +965,15 @@ the second pass neutralised **all twelve** handle frees across `bridge.ts`,
 `language-tree.ts`, `runtime.ts`, `query.ts`, `named-queries.ts` and
 `lua/treesitter/api.ts`. With nothing freed at all a use-after-free is
 impossible, and it **still segfaulted** at the same `b57` site.
+
+**This conclusion is invalid, and it is the one that cost the investigation the
+most.** Neutralising the twelve in-repo `delete()` calls never achieved
+"nothing freed": `web-tree-sitter` registers every handle with its own
+`FinalizationRegistry`, so GC kept freeing each dropped handle regardless. The
+use-after-free class was never excluded, and it is in fact the root cause --
+see "ROOT CAUSE: a leaked `TreeCursor` and `web-tree-sitter`'s
+FinalizationRegistry" above. Read correctly, this arm is evidence _for_ the
+finalizer path, because removing our frees leaves the GC frees untouched.
 
 So the fault is a **bad index, not a stale pointer**, which reframes it
 usefully: something passes a large value into a WASM-backed call, and
@@ -873,7 +1011,9 @@ consistent with how many single-mechanism explanations have now died here.
 Refuted so far, each by measurement: OOM and memory growth, `/dev/shm`, CPU
 count, process and handle buildup, six container security and namespace
 settings, Neovim liveness, msgpack decoding, payload size, JS heap and DOM
-growth, the whole tree-sitter use-after-free class, and oversized positions.
+growth, ~~the whole tree-sitter use-after-free class~~, and oversized
+positions. The use-after-free entry is struck because the arm that produced it
+was invalid; it is the root cause.
 
 ### Implemented: the renderer stops parsing while RPC is connected
 

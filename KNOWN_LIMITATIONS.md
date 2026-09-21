@@ -16,7 +16,36 @@ The feature bridge generates Neovim mappings and user commands from the plugin's
 
 M5 structural motions and Markdown text objects are Class A′ buffer-text behavior and do not cross the Obsidian feature bridge. The bundled companion installs buffer-local mappings backed by Neovim's bundled `markdown` and `markdown_inline` treesitter parsers and removes them during companion teardown. M5b covers emphasis, inline code, math, strikethrough, links and wikilinks, fenced code blocks, nested blockquotes, callouts, HTML tags, table cells, and table rows in operator-pending and visual modes. Operators execute over an explicit bounded visual range rather than a cursor-moving callback. Neovim's native `it`/`at` supplies tag matching, with the count consumed once to match the fork's custom object. Highlight (`i=`/`a=`) remains unavailable under RPC because Neovim's bundled Markdown grammar does not expose `==...==` as a syntax node; the companion does not fake a treesitter range with delimiter scanning. The mirrored buffer receives the plugin's `textwidth`; native `gq` and `gw` use Neovim's stock Markdown ftplugin rather than a ported wrapping implementation.
 
-### Intermittent renderer crash when disconnecting the RPC backend
+### ~~Intermittent renderer crash when disconnecting the RPC backend~~ (Fixed)
+
+**Status: fixed, and the cause was not what this entry described.** The crash
+was a leaked `web-tree-sitter` `TreeCursor`. `getAllNodesOfType` in
+`src/treesitter/js-api.ts` allocated one per structural motion and never called
+`delete()`, so it stayed in `web-tree-sitter`'s `FinalizationRegistry` — which
+registers a cursor under its **tree's** pointer, not its own. The CM6 bridge
+frees that tree on the next re-parse, and GC then fired the finalizer against a
+dangling pointer, corrupting the WASM allocator from a GC callback. That is why
+it needed RPC traffic (which drives the re-parses and the allocation churn) and
+fork editing (which leaked the cursors) in the same session.
+
+Isolating the two halves of the original fix measured the leak at **5 of 8**
+container runs with no nodes retained, against **0 of 6** for the retaining walk
+with the cursor freed. The reproducer spec that measured 24 of 46 now measures
+**0 segfaults in 16 runs** (p ≈ 0.004 against its own 29% post-mitigation rate).
+`.ast-grep/rules/treesitter-handle-leak.yml` gates the shape.
+
+The deferred-teardown mitigation described below has been **removed**. It was
+adopted on a measurement that is now known to have been confounded — both of
+its arms contained the leak. With the leak fixed, the reproducer measures 0
+segfaults in 16 runs in all three teardown shapes: the 3-second deferral, the
+original synchronous `qa!`-and-wait that used to crash 24 of 46, and the
+immediate non-blocking `SIGTERM` that now ships. 48 runs, 0 segfaults. Teardown
+keeps the non-blocking shape on its own merits — disconnect returns immediately
+instead of blocking for up to four seconds — but the 3-second delay that existed
+only as a crash mitigation is gone.
+
+The original description follows, since the reasoning it records is what the
+evidence above corrects.
 
 Disabling the Neovim backend can crash Obsidian's renderer process. It is a
 native SIGSEGV — a read of an unmapped page through what looks like a corrupted
@@ -34,9 +63,15 @@ Neovim's output.
 Removing the synchronous `qa!`-and-wait from teardown reduces it about threefold
 (7 of 38 runs versus 24 of 46, Fisher p = 0.002) and is shipped, but a residual
 path remains: retaining the child process indefinitely still crashed 3 of 8 runs.
-Memory, JS heap growth, DOM growth, tree-sitter WASM handle lifetime, msgpack
-recursion depth, Electron version, and every container security and namespace
-setting are all excluded by measurement.
+Memory, JS heap growth, DOM growth, msgpack recursion depth, Electron version,
+and every container security and namespace setting are all excluded by
+measurement.
+
+**Tree-sitter WASM handle lifetime was previously listed here as excluded. That
+was wrong**, and it is the root cause recorded above. The arm that appeared to
+exclude it neutralised this repository's `delete()` calls but not
+`web-tree-sitter`'s `FinalizationRegistry`, so it never achieved "nothing
+freed" and never excluded anything.
 
 Electron's own guidance is that a renderer should not own a crash-prone child
 process — `UtilityProcess` exists for exactly this, and spawning subprocesses is
@@ -240,7 +275,9 @@ Neovim's contract is that a re-parse produces a _new_ tree and leaves the old on
 
 **Measured severity**: stale data, not a crash — 80 nodes read after their tree was deleted, in each of 6 runs, with 0 segfaults. `tree.delete()` frees _within_ the mapped heap rather than unmapping, so the read returns plausible-looking but wrong types and ranges.
 
-**Status**: declined, not deferred. Both mechanisms that would fix it are unavailable. fengari arms its `FinalizationRegistry` only for full userdata, while nodes are light userdata on plain tables, so `__gc` never runs for them. Reference counting is not available either, because the fix would have to keep trees alive from node references, and that is a table-to-full-userdata conversion across all 31 node methods plus a fengari change — not a localized patch. Keeping the old trees instead leaks one tree per re-parse for the life of the session.
+**Status**: declined, not deferred. Both mechanisms that would fix it are unavailable. fengari arms its `FinalizationRegistry` only for full userdata, while nodes are light userdata on plain tables, so `__gc` never runs for them. Reference counting is not available either, because the fix would have to keep trees alive from node references, and that is a table-to-full-userdata conversion across all 31 node methods plus a fengari change — not a localized patch.
+
+Note that simply dropping the `delete()` calls is **not** a safe alternative. `web-tree-sitter` registers every handle with its own `FinalizationRegistry`, so a dropped tree is still freed — just at a GC-determined moment instead of a known one, which is strictly harder to reason about. A cursor is worse: it registers holding its _tree's_ pointer, so a dropped cursor whose tree was already deleted frees a dangling pointer from a GC callback. That is the root cause of the renderer segfault recorded in `test/flaky-inventory.md`.
 
 **Workaround**: re-acquire nodes after any edit rather than holding them across one, which is good practice against Neovim as well.
 
