@@ -88,8 +88,6 @@ const REQUIRED_API_LEVEL = 12;
 const REQUIRED_VERSION = '0.12';
 const CONNECT_TIMEOUT_MS = 10_000;
 const SIGKILL_ESCALATION_MS = 2_000;
-// Measured, not chosen for taste. See scheduleChildShutdown.
-const DEFERRED_SHUTDOWN_DELAY_MS = 3_000;
 
 let childProcessCache: ChildProcessModule | null = null;
 
@@ -488,39 +486,33 @@ export class NeovimConnection {
     }
 
     /**
-     * Ends the child on a later turn instead of inside this teardown.
+     * Ends the child without awaiting it.
      *
-     * Quitting it here and awaiting its `'close'` crashed the renderer --
-     * SIGSEGV reading a corrupted compressed pointer, no JavaScript frame to
-     * blame. It needs both RPC traffic and a disconnect: 216 non-RPC tests, 432
-     * traffic-free connect cycles and 2,400 toggle-free requests were all
-     * clean, while specs doing both crashed 24 of 46 runs. Stubbing the
-     * extmark, float, line and cursor handlers changed nothing, so the fault
-     * was never in what we do with the data.
+     * This used to defer the whole shutdown by three seconds, as a mitigation
+     * for a renderer SIGSEGV on disconnect. That crash has since been root
+     * caused -- a leaked `web-tree-sitter` `TreeCursor` whose GC finalizer
+     * freed a tree the CM6 bridge had already deleted, nothing to do with
+     * teardown -- and the deferral is gone with it. The measurement that
+     * justified it was confounded: both of its arms contained the leak. With
+     * the leak fixed, the reproducer spec measures 0 segfaults in 16 runs both
+     * with the deferral and with the original synchronous quit-and-wait, which
+     * used to crash 24 of 46.
      *
-     * This is a mitigation, not a cure, and the numbers say so: dropping the
-     * synchronous quit-and-wait takes it from 24/46 (52%) to 7/38 (18%),
-     * p = 0.002. A residual path survives -- never killing the child at all
-     * still crashed 3 of 8 -- so do not read this as fixed.
-     *
-     * No `qa!` here: sending it made Neovim exit immediately, which is the
-     * thing that must not happen. SIGTERM lets Neovim exit on its own terms and
-     * preserve its swap file, and this mirror buffer is `acwrite` -- Obsidian
-     * owns the file, so there is nothing of the user's to lose. Nothing is
-     * awaited, and both timers self-check `exitCode`/`signalCode`, so a child
-     * that has already gone is left alone. If the window dies first the pipes
-     * close with it and `nvim --embed` exits on channel close regardless.
+     * What is kept is not the mitigation but the shape, which is better on its
+     * own merits. Nothing is awaited, so disconnect returns immediately instead
+     * of blocking for up to four seconds. No `qa!`: that made Neovim exit
+     * immediately, while SIGTERM lets it exit on its own terms. Both paths
+     * self-check `exitCode`/`signalCode`, so a child that has already gone is
+     * left alone, and if the window dies first the pipes close with it and
+     * `nvim --embed` exits on channel close regardless.
      */
     private scheduleChildShutdown(child: ChildProcessHandle): void {
+        if (child.exitCode !== null || child.signalCode !== null) return;
+        child.kill('SIGTERM');
         window.setTimeout(() => {
             if (child.exitCode !== null || child.signalCode !== null) return;
-            child.kill('SIGTERM');
-            window.setTimeout(() => {
-                if (child.exitCode !== null || child.signalCode !== null)
-                    return;
-                child.kill('SIGKILL');
-            }, SIGKILL_ESCALATION_MS);
-        }, DEFERRED_SHUTDOWN_DELAY_MS);
+            child.kill('SIGKILL');
+        }, SIGKILL_ESCALATION_MS);
     }
 
     private handleClose(
