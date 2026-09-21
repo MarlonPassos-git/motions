@@ -47,6 +47,33 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
 
+## The picker entry now carries its own evidence
+
+`a config reload closes an open picker instead of leaking it` made two
+assertions against fixed delays, and the CI failure could not distinguish them:
+`pickerOpen()` false at the first meant the picker never opened, which is a test
+race; true at the second meant the reload failed to close it, which is the
+product leak the test exists to catch.
+
+Both now wait. Opening fails with `picker never opened after Q`. Failing to
+close throws with the DOM state instead of a bare `expect(true).toBe(false)`.
+Negative-controlled by removing the reload, which produces:
+
+```
+picker survived the config reload:
+{"activeEl":"vim-motions-picker-input","modalContainers":1,"pickers":1,"prompts":0}
+```
+
+So the next Windows occurrence reports which of the two it is, and what
+survived. 10 passing, 4 of 4 clean on Linux — which is no-regression evidence
+only, since Linux has never reproduced it.
+
+`#181` was left alone: it already carries a diagnosis block covering
+`reducedMotion` and canvas sizing, added by an earlier session. The known gap
+there is that it only runs on failure, so there is no passing baseline to
+compare against — worth fixing if it recurs, but not worth adding a second
+diagnostic on top of an untested first one.
+
 ## `#136`: a sleep that was covering more than it looked like
 
 `j after Enter cell edit should navigate to next row (#136)` failed on macOS
