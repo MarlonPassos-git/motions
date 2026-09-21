@@ -47,6 +47,30 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
 
+## `#136`: a sleep that was covering more than it looked like
+
+`j after Enter cell edit should navigate to next row (#136)` failed on macOS
+with `expect(received).not.toBeNull()` — the highlighted cell was null after a
+fixed 300 ms following `j`, so the highlight had not repainted yet.
+
+The obvious fix was to replace all three fixed pauses in that test with waits.
+That made it **deterministically worse**: 1 failing in 4 of 4 runs, with
+`table-nav highlight never returned after Escape`. `hasCellEditor()` becomes
+true as soon as the element exists, which is sooner than the 800 ms it
+replaced, so Escape arrived before the cell editor had finished initialising and
+nav mode never came back.
+
+The lesson is worth keeping, because it cuts against the rest of this file: a
+fixed sleep is not always a lazy wait. Those two were covering **initialisation
+that exposes no signal**, and turning them into existence checks removed time
+the test genuinely needed. Only the final step — where the highlight has an
+observable signal and the assertion was the thing racing — was converted. 28
+passing, 4 of 4 clean.
+
+Both of this run's macOS entries were therefore test defects rather than product
+defects, and both were the same shape: an assertion made against a fixed delay
+instead of the condition it depended on.
+
 ## The frontmatter entry: the planted diagnostic answered it
 
 `keeps source-rendered frontmatter fully navigable` is resolved, and it was a
