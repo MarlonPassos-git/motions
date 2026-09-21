@@ -234,6 +234,16 @@ These functions are present (calling them won't error) but don't perform their i
 
 These are lower priority because the plugin provides equivalent native features (highlighting, folding) and the functions are rarely called by Neovim plugins (they're Neovim UI/editor integration points, not plugin API).
 
+### `TSNode` handles go stale after a re-parse
+
+Neovim's contract is that a re-parse produces a _new_ tree and leaves the old one valid until its owner deletes it, so Lua written against Neovim may hold a node across an edit. This plugin deletes the old tree on re-parse, and a `TSNode` is a light userdata holding an address into WASM linear memory. A node read after its tree was replaced therefore returns whatever now occupies that address.
+
+**Measured severity**: stale data, not a crash — 80 nodes read after their tree was deleted, in each of 6 runs, with 0 segfaults. `tree.delete()` frees _within_ the mapped heap rather than unmapping, so the read returns plausible-looking but wrong types and ranges.
+
+**Status**: declined, not deferred. Both mechanisms that would fix it are unavailable. fengari arms its `FinalizationRegistry` only for full userdata, while nodes are light userdata on plain tables, so `__gc` never runs for them. Reference counting is not available either, because the fix would have to keep trees alive from node references, and that is a table-to-full-userdata conversion across all 31 node methods plus a fengari change — not a localized patch. Keeping the old trees instead leaks one tree per re-parse for the life of the session.
+
+**Workaround**: re-acquire nodes after any edit rather than holding them across one, which is good practice against Neovim as well.
+
 ### `get_captures_at_pos()` / `get_captures_at_cursor()` return empty
 
 These functions still return empty tables. Named query loading is now available, but these helpers are not wired to evaluate a highlights query. Adding a `highlights.scm` file alone does not implement them.

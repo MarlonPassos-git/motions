@@ -96,6 +96,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Renderer crash from retained tree-sitter nodes** — `getAllNodesOfType()` collected `Node` objects during a tree walk and read them afterwards, and `headingLevelFromNode()` called `node.child()` on those retained nodes. A `Node` is a JavaScript object holding an address into WASM linear memory, so any parse that grows that memory replaces the backing buffer and leaves the retained node pointing into a detached one — a read at `base + garbage`, which segfaults the renderer with no JavaScript frame. Structural heading motions (`]h`, `[h`, level variants) now walk with a `TreeCursor` and extract plain data, retaining no node and deleting the cursor. Measured against an isolated reproducer: **8 of 16 runs before, 0 of 16 after**; the full spec went from a pooled 29% to **0 of 16**.
     - Plugin: `src/treesitter/js-api.ts`, `src/motions/headings.ts`
+- **`vim.treesitter.query.parse()` leaked its compiled query** — every call built a `QueryWrapper` that no cache owned, so `NamedQueries.dispose()` never saw it and the underlying WASM query survived for the life of the Lua state. Parsed queries are now tracked and deleted on state close alongside the named ones, through `runCleanups` so one failing disposer cannot skip the rest.
+    - Plugin: `src/lua/treesitter/query-api.ts`
+- **Query capture nodes carried no tree reference** — `Query:iter_captures()` and `Query:iter_matches()` pushed nodes without a `_tree` field, so `node:tree()` returned `nil` and every node reached through `:parent()`/`:child()` lost the reference too, unlike Neovim. Both iterators now hold the source node's tree table in the Lua registry and attach it to each capture, matching the existing `iter_children` shape and releasing the reference when the iterator is exhausted.
+    - Plugin: `src/lua/treesitter/query-api.ts`
+- **The Lua treesitter parser caches outlived the Lua state** — `parserCache` and `ltreeCache` were module-level, so `lua_close` left both populated: a reloaded configuration inherited the previous state's trees, and their WASM trees, parsers, and injection queries were never freed. Both are now per-state and disposed through `registerStateCleanup`, deleting cached trees and destroying cached `LanguageTree`s.
+    - Plugin: `src/lua/treesitter/api.ts`
 
 ### Tests
 
@@ -128,6 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **M8a external-UI message coverage** — `test/specs/rpc-messages.e2e.ts` covers eight scenarios for informational and error Notices, real-key Lua errors, silent undo/search kinds, one-per-message dispatch, duplicate limiting, and 200-key grid-event latency. `rpc-messages-negative-controls.md` records missing-dispatch, noisy-kind, and removed-dedup failures with observed counts and values.
 - **M8b external command-line coverage** — `test/specs/rpc-cmdline.e2e.ts` drives all 11 command-line, caret, prefix, prompt, selection, cancellation, nesting, and bundled-fork-isolation scenarios through real editor key events. `rpc-cmdline-negative-controls.md` records stale-hide, raw-byte-caret, and single-level-state failures with observed counts and values.
 - **M8c popup-menu and M8d status-mode coverage** — `test/specs/rpc-popupmenu.e2e.ts` drives insert completion and command-line wildmenu selection/hide through real editor key events, while four lifecycle scenarios cover insert, normal, visual-line, and disconnect arbitration. `rpc-popupmenu-negative-controls.md` records ignored-selection, wrong-anchor, and suppressed-mode-handler failures with observed counts and values.
+- **Treesitter Lua memory-safety coverage** — `test/unit/lua/treesitter-queries.test.ts` adds three regressions against the real bundled grammars: `query.parse()` wrappers are deleted on state close, capture nodes from both iterators expose their tree, and the parser cache is freed on close without leaking into the next state. Each was negative-controlled against the defect it replaces — 0 deletes instead of 3, `iter_captures node has no tree` and `iter_matches node has no tree`, and 1 delete instead of 2.
 - **Undo-tree navigation is asserted behaviourally** — the existing `g-`/`g+` scenarios asserted only that the keys did not crash and left the mode alone, both of which held for the entire time `g-` was broken. `test/specs/undo-tree.e2e.ts` now asserts that the live tree's current sequence moves, which fails against the previous code with the sequence unchanged at 20 instead of 19 while the two non-crash scenarios still pass.
 
 ### Documentation
@@ -228,6 +235,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md`, `KNOWN_LIMITATIONS.md`: removes stale milestone wording while preserving the certified M7 measurements.
 - `AGENTS.md`, `CONTRIBUTING.md`: source-tree gaps, pinned installer/workflow ownership, RPC prerequisite guard, and current latency gate.
 - `CHANGELOG.md`: cross-platform CI provisioning, shared skip behavior, Windows scenario scope, and documentation updates.
+- `test/flaky-inventory.md`: the WASM heap-move mechanism is refuted by measurement — 84 probe readings across master and the reverted retaining walk, including failing runs, all report zero heap growth. Pre-growing the heap is dropped, and the four places that stated the mechanism as established are corrected. The retained-node fix and its measurements stand; only the stated reason was wrong.
+- `KNOWN_LIMITATIONS.md`: Lua `TSNode` handles become stale after a re-parse, and lifetime management is declined rather than deferred.
 
 ## [0.150.0] - 2026-09-10
 
