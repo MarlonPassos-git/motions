@@ -47,6 +47,45 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
 
+## Recommendation on the Lua TSNode question: not a generation counter
+
+Reading `api.ts` changes the diagnosis. Line 122 does `if (oldTree)
+oldTree.delete()` on re-parse, and line 212 the same, so when a user's Lua holds
+a node and anything re-parses, **we free the tree those nodes point into**. That
+is a plain use-after-free of our own making, not the WASM heap-move story the
+earlier entries assumed.
+
+tree-sitter's contract is the opposite: a re-parse yields a _new_ tree and
+leaves the old one valid until its owner deletes it. Neovim behaves that way, so
+Lua written against Neovim is correct and we break it.
+
+That makes a generation counter the wrong instrument. It would report the
+breakage on every node method, at a per-call cost, while leaving the cause in
+place — and it would make code fail that is valid everywhere else.
+
+Recommended order:
+
+1. **Measure first.** No Lua reproducer exists; this hazard is identified by
+   shape, not observation. Hold a node, force re-parses, use it, and see whether
+   it crashes. Every time this investigation built before measuring, it built
+   the wrong thing.
+2. **Stop deleting the old tree on re-parse.** Node userdata already holds a
+   Lua reference to its tree (`applyTreeRef`/`treeIndex` in `node.ts`), so
+   lifetime can follow references, with `__gc` via `FinalizationRegistry`
+   collecting trees nothing points at. Semantically correct, no API change, no
+   per-call cost.
+3. **Pre-growing the WASM heap** is the separate belt-and-braces for the
+   genuine heap-move class, which affects JS sites too. Optional, and a
+   mitigation rather than a fix.
+4. **Generation counter only if 2 proves infeasible** — for instance if trees
+   cannot be kept alive without unbounded growth. It is the fallback that trades
+   a crash for a wrong-but-safe error, and it should be chosen knowingly rather
+   than by default.
+
+Worth noting the framing error this corrects: the Lua path was filed under the
+same root cause as the heading-motion crash because the symptom matched. It is a
+different defect that happens to produce a similar fault.
+
 ## The picker entry now carries its own evidence
 
 `a config reload closes an open picker instead of leaking it` made two
