@@ -57,10 +57,11 @@ heap. JavaScript garbage collection reclaims the handle; it does not free the
 tree, which only `.delete()` does. Dropping the calls therefore leaks the
 underlying allocation for every re-parse, for the life of the session.
 
-That is the wrong direction twice over. It leaks, and it drives exactly the
-**heap growth** that moves the backing buffer — which is the mechanism behind
-the one failure here that actually segfaults. The correctness fix for stale
-reads would make the crash class more likely.
+That is the wrong direction twice over. It leaks, and it drives heap growth —
+which this file long believed was the mechanism behind the one failure that
+segfaults. **That mechanism has since been measured and refuted**; see
+"Measured: the WASM heap never grows, in either configuration" below. Removing
+the deletes is still wrong, but for the leak alone.
 
 So step 2 needs lifetime management rather than deletion removal. **Both
 mechanisms this file previously proposed for it are unavailable, and the claims
@@ -85,9 +86,10 @@ reviewed recommendation is to **decline it** and fix three real defects instead;
 see `.omo/plans/treesitter-memory-safety.md`.
 
 Given the measured severity — stale data, not a crash — this is not urgent, and
-it should not be started as a quick cleanup. The sequencing that matters:
-**pre-growing the heap addresses the crash class and is independent**, so it can
-be done first and on its own.
+it should not be started as a quick cleanup. This file previously sequenced
+**pre-growing the heap** ahead of it as an independent answer to the crash
+class; that has since been measured and dropped, so there is no longer a
+cheaper thing to do first.
 
 ## Measured: the Lua TSNode use-after-free does not crash
 
@@ -101,9 +103,14 @@ so a clean run cannot be confused with Lua that never ran.
 
 The explanation fits the rest of this file. `tree.delete()` frees _within_ WASM
 linear memory; it does not unmap anything, so the address stays inside the
-mapped heap and the read returns stale bytes rather than faulting. Only a heap
-**move** — growth replacing the backing buffer — produces an address outside the
-mapping, which is what the heading walk hit and why that one segfaulted.
+mapped heap and the read returns stale bytes rather than faulting.
+
+The second half of that explanation — that the heading walk faulted because a
+heap **move** put its address outside the mapping — **is refuted by direct
+measurement**, recorded below. The heap never grows in either configuration, so
+whatever kills the renderer there, it is not a detached backing buffer. What
+survives is the first half: a read inside the mapped heap, returning whatever
+now occupies the address.
 
 So the Lua path's real risk is **silent wrong data, not a crash**: a node read
 after its tree was freed can return a plausible-looking type or range taken from
@@ -115,6 +122,78 @@ was still loaded, which would have passed whether or not the Lua ran — the exa
 vacuity this file criticises elsewhere. The second failed to read its own
 channel (`scrolloff` instead of `scrolloffLines`) and reported `-1` six times,
 which is the only reason it was caught.
+
+## Measured: the WASM heap never grows, in either configuration
+
+Step 0 of `.omo/plans/treesitter-memory-safety.md` was a kill gate on
+pre-growing the heap: if the heap never grows during the reproducer, then
+pre-growing it is a provable no-op that still commits mobile memory. It
+returned more than that. It refuted the mechanism this file had settled on.
+
+The instrument is a caller-owned `new WebAssembly.Memory({ initial: 512,
+maximum: 32768 })` passed as `Parser.init({ wasmMemory })`, with `grow`
+wrapped to count calls. `initial` is deliberately the upstream default, so the
+probe observes production behaviour instead of changing it.
+
+Two controls, because `grows: 0` is worthless without them:
+
+- **Does the option apply at all?** `Parser.init` takes
+  `Partial<EmscriptenModule>`, `EmscriptenModule` is never defined and
+  `@types/emscripten` is not installed, so under `-skipLibCheck` it is `any`
+  and a misspelled key compiles. The plan's control — misspell it, expect
+  `grows: 0, pages: 512` — cannot on its own distinguish an ignored option
+  from an applied one over a heap that never grows, because both report
+  exactly that. So the probe also reports `applied`, by counting non-zero
+  bytes in its own buffer: an ignored option leaves that memory untouched.
+- **Can the counter see growth at all?** Run the same probe on the host,
+  outside Obsidian, against a document big enough to force growth.
+
+| control                   | applied   | nonZeroBytes | grows | pages         | parses |
+| ------------------------- | --------- | ------------ | ----- | ------------- | ------ |
+| `wasmMemory`, 950 KB doc  | **true**  | 999,290      | **2** | 512 → **738** | yes    |
+| `wasmMemroy` (misspelled) | **false** | 0            | 0     | 512           | yes    |
+
+So the option applies, and the counter detects growth when growth happens.
+
+Then the measurement, in the CI container, polling from `afterTest`:
+
+| configuration                            | spec(s)                         | readings | applied   | grows | peak |
+| ---------------------------------------- | ------------------------------- | -------- | --------- | ----- | ---- |
+| master (fixed, cursor-only walk)         | `rpc-structural-nav`            | 14       | true, all | **0** | 512  |
+| master (fixed, cursor-only walk)         | `navigation` + `fold-providers` | 24       | true, all | **0** | 512  |
+| `js-api.ts`/`headings.ts` at `88ec375~1` | `rpc-structural-nav` × 4 runs   | 46       | true, all | **0** | 512  |
+
+**84 readings, `grows: 0` and `peakPages: 512` in every one.**
+
+The third row is the one that matters, and it is not what the plan asked for.
+Step 0 as written measures master — where the fix already deleted the
+allocating path — so `grows: 0` there is equally consistent with "the fix
+removed the growth", and refutes nothing. Reverting `js-api.ts` and
+`headings.ts` to before `88ec375` puts the retaining walk back, and **two of
+those four runs failed**, both stalling after the same test
+(`matches operator-pending link motion edits`), so that arm is genuinely the
+failing arm. The heap did not grow in the failing runs either.
+
+**Verdict: do not implement Item 1.** Pre-growing a heap that never grows
+cannot prevent anything. The plan called this outcome a success and it is:
+it costs one container run and removes a permanent mobile memory cost from
+the roadmap.
+
+What this does **not** overturn: the fix. `getNodeSummariesOfType` measured
+8/16 → 0/16 and 29% → 0/16, twice green in CI, and retaining a node across a
+parse is still wrong. Only the stated reason was wrong. With growth excluded
+here and frees excluded earlier (neutralising every free still crashed 8/16),
+the mechanism is **open** — the remaining candidate is a read inside the
+mapped heap against an address the allocator has since reused, which is the
+first half of the `tree.delete()` explanation above and is not yet measured.
+Do not write it up as established.
+
+Two caveats worth keeping. `dmesg` inside the container exposed 26 lines of
+container networking and no process records even under `--privileged`, so it
+is **not** a segfault detector here; the reproduced failure is a WebDriver
+timeout inside `setRpcEnabled`, which is consistent with a dead renderer but
+is not proof of `SIGSEGV`. And the probe reads its own buffer, so it reports
+growth of the heap tree-sitter uses — not renderer memory generally.
 
 ## Recommendation on the Lua TSNode question: not a generation counter
 
@@ -140,9 +219,10 @@ Recommended order, with step 1 now done and the answer above:
    lifetime can follow references, with `__gc` via `FinalizationRegistry`
    collecting trees nothing points at. Semantically correct, no API change, no
    per-call cost.
-3. **Pre-growing the WASM heap** is the separate belt-and-braces for the
-   genuine heap-move class, which affects JS sites too. Optional, and a
-   mitigation rather than a fix.
+3. ~~**Pre-growing the WASM heap** is the separate belt-and-braces for the
+   genuine heap-move class.~~ Dropped: the heap never grows, measured at 84
+   readings across both configurations. There is no heap-move class to brace
+   against.
 4. **Generation counter only if 2 proves infeasible** — for instance if trees
    cannot be kept alive without unbounded growth. It is the fallback that trades
    a crash for a wrong-but-safe error, and it should be chosen knowingly rather
@@ -810,9 +890,12 @@ consumers (`code-block`, `blockquote`, `delimiter`, `snippets/context`), which
 already retain regex fallbacks for when the bridge is unavailable.
 
 Worth evaluating on two grounds. It removes duplicated parsing on every
-keystroke while connected. And it removes the WASM heap growth that made the
+keystroke while connected. And it removes the RPC-driven parses that made the
 retained-node defect reachable in the first place: the crash needed the fork
-walking nodes _while_ RPC-driven parses grew the heap.
+walking nodes _while_ something else re-parsed. (This paragraph originally
+attributed that to heap growth, which has since been measured at zero; the
+second ground still holds, because what the retained node needs is a re-parse,
+not a larger heap.)
 
 What would need checking first: which consumers are genuinely dormant under RPC
 versus still reading the renderer tree, whether fold metadata quality survives
@@ -947,16 +1030,22 @@ previously guessed at:
   crashed 7/16.
 
 So a tree that is alive and correctly parsed still faults when walked. The
-remaining candidate that fits every observation is **web-tree-sitter node
-pointers outliving a WASM heap move**: nodes are JS objects holding addresses
-into WASM linear memory, and a parse that grows that memory replaces the backing
-buffer, leaving any retained node pointing into a detached one. That produces
-exactly the recorded fault -- a read at `base + garbage_u32`, in JIT code, with
-no JavaScript frame -- and it explains why neutralising frees made no
-difference, since leaking trees makes growth _more_ likely, not less.
+candidate taken forward at this point was **web-tree-sitter node pointers
+outliving a WASM heap move**: nodes are JS objects holding addresses into WASM
+linear memory, and a parse that grows that memory replaces the backing buffer,
+leaving any retained node pointing into a detached one. It fits the recorded
+fault -- a read at `base + garbage_u32`, in JIT code, with no JavaScript frame
+-- and it appeared to explain why neutralising frees made no difference, since
+leaking trees makes growth _more_ likely, not less. It also appeared to explain
+the alternation requirement: the fork phase walks nodes while the RPC phase
+drives parsing.
 
-It also explains the alternation requirement: the fork phase walks nodes while
-the RPC phase drives enough parsing to grow the heap.
+**This was later refuted by measurement** -- the heap does not grow at all, in
+either configuration, including in failing runs; see "Measured: the WASM heap
+never grows, in either configuration". The fix derived from it is still correct
+and still measured; the mechanism is open. Read the rest of this section as the
+reasoning that produced a working fix for the wrong reason, which is the
+recurring lesson of this file.
 
 Note what the codebase already does correctly here: `src/fold/metadata.ts`
 extracts readonly plain-data ranges and titles rather than retaining nodes. The
