@@ -47,6 +47,33 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
 
+## Measured: the Lua TSNode use-after-free does not crash
+
+Driving it directly rather than reasoning about it. A Lua mapping takes a node,
+replaces the buffer through `nvim_buf_set_lines` so the parser cache re-parses
+and deletes the old tree, and repeats forty times, keeping every node. It then
+reads `:type()` on all of them and reports the count through `scrolloffLines`,
+so a clean run cannot be confused with Lua that never ran.
+
+**80 nodes read after their tree was deleted, in each of 6 runs, 0 segfaults.**
+
+The explanation fits the rest of this file. `tree.delete()` frees _within_ WASM
+linear memory; it does not unmap anything, so the address stays inside the
+mapped heap and the read returns stale bytes rather than faulting. Only a heap
+**move** — growth replacing the backing buffer — produces an address outside the
+mapping, which is what the heading walk hit and why that one segfaulted.
+
+So the Lua path's real risk is **silent wrong data, not a crash**: a node read
+after its tree was freed can return a plausible-looking type or range taken from
+reused memory. That is a genuine bug and a much less severe one, and it lowers
+the priority of everything in the section below.
+
+Two process notes. The first version of this probe asserted only that the plugin
+was still loaded, which would have passed whether or not the Lua ran — the exact
+vacuity this file criticises elsewhere. The second failed to read its own
+channel (`scrolloff` instead of `scrolloffLines`) and reported `-1` six times,
+which is the only reason it was caught.
+
 ## Recommendation on the Lua TSNode question: not a generation counter
 
 Reading `api.ts` changes the diagnosis. Line 122 does `if (oldTree)
@@ -63,12 +90,9 @@ That makes a generation counter the wrong instrument. It would report the
 breakage on every node method, at a per-call cost, while leaving the cause in
 place — and it would make code fail that is valid everywhere else.
 
-Recommended order:
+Recommended order, with step 1 now done and the answer above:
 
-1. **Measure first.** No Lua reproducer exists; this hazard is identified by
-   shape, not observation. Hold a node, force re-parses, use it, and see whether
-   it crashes. Every time this investigation built before measuring, it built
-   the wrong thing.
+1. ~~**Measure first.**~~ Done: it does not crash, it returns stale data.
 2. **Stop deleting the old tree on re-parse.** Node userdata already holds a
    Lua reference to its tree (`applyTreeRef`/`treeIndex` in `node.ts`), so
    lifetime can follow references, with `__gc` via `FinalizationRegistry`
