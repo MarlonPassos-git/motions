@@ -588,6 +588,31 @@ describe('treesitter named queries (real bundled grammars)', () => {
         L = createSandboxedState();
     });
 
+    it('frees the trees handed to Lua that no cache owns', () => {
+        const probe = runtime.parseString('markdown', '# probe');
+        const deleted = vi.spyOn(
+            Object.getPrototypeOf(probe) as { delete: () => void },
+            'delete',
+        );
+        probe.delete();
+        expect(deleted).toHaveBeenCalledTimes(1);
+
+        // get_string_parser and TSTree:copy() each allocate a handle no cache
+        // holds. Plus the document parser's own cached tree on close.
+        run(`
+            local t = vim.treesitter.get_string_parser('# one', 'markdown')
+            assert(t:root():type() ~= nil)
+            local c = t:copy()
+            assert(c:root():type() ~= nil)
+        `);
+        expect(deleted).toHaveBeenCalledTimes(1);
+
+        destroyState(L);
+        expect(deleted).toHaveBeenCalledTimes(3);
+
+        L = createSandboxedState();
+    });
+
     it.each([
         ['markdown_inline', '[link](https://example.com)'],
         ['html', '<div title="example">Hello</div><script>let x = 1;</script>'],

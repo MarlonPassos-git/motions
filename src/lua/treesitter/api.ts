@@ -2,7 +2,7 @@ import { lua, lauxlib, to_luastring, to_jsstring } from '../../lib/fengari';
 import type { lua_State } from '../../lib/fengari';
 import type { Tree } from 'web-tree-sitter';
 import { pushTSNode, extractNode } from './node';
-import { pushTSTree } from './tree';
+import { pushTSTree, setTreeOwner } from './tree';
 import { pushLanguageTree } from './language-tree-api';
 import { injectLanguageApi, setLanguageRuntime } from './language';
 import { injectQueryApi, setQueryRuntime } from './query-api';
@@ -68,14 +68,21 @@ export function injectTreesitterApi(
         string,
         import('../../treesitter/language-tree').LanguageTree
     >();
+    // Trees handed to Lua that no cache owns: `get_string_parser` and
+    // `TSTree:copy()`. Left untracked their only reclaim is a GC finalizer.
+    const ownedTrees = new Set<Tree>();
+    setTreeOwner((tree) => ownedTrees.add(tree));
     registerStateCleanup(L, () => {
         const disposers: (() => void)[] = [];
         for (const { tree } of parserCache.values())
             disposers.push(() => tree.delete());
         for (const ltree of ltreeCache.values())
             disposers.push(() => ltree.destroy());
+        for (const tree of ownedTrees) disposers.push(() => tree.delete());
         parserCache.clear();
         ltreeCache.clear();
+        ownedTrees.clear();
+        setTreeOwner(null);
         runCleanups(disposers, 'treesitter parser cache');
     });
 
@@ -173,6 +180,7 @@ export function injectTreesitterApi(
             );
         }
 
+        ownedTrees.add(tree);
         pushTSTree(state, tree, str);
         return 1;
     });
