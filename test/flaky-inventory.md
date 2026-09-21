@@ -47,6 +47,33 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
 
+## Why step 2 is not just deleting the delete
+
+The obvious reading of "stop deleting the old tree on re-parse" is to remove the
+two `oldTree.delete()` calls. That would be worse than the bug it fixes.
+
+A `web-tree-sitter` `Tree` is a JavaScript handle onto memory inside the WASM
+heap. JavaScript garbage collection reclaims the handle; it does not free the
+tree, which only `.delete()` does. Dropping the calls therefore leaks the
+underlying allocation for every re-parse, for the life of the session.
+
+That is the wrong direction twice over. It leaks, and it drives exactly the
+**heap growth** that moves the backing buffer — which is the mechanism behind
+the one failure here that actually segfaults. The correctness fix for stale
+reads would make the crash class more likely.
+
+So step 2 needs lifetime management rather than deletion removal: free a tree
+when nothing references it, through a `FinalizationRegistry` on the handle
+(fengari already uses one in `lstate.ts` for userdata `__gc`), or by reference
+counting the nodes handed to Lua. Both are real work, both need a way to verify
+that trees are actually freed rather than assumed to be, and neither should be
+attempted without that measurement in place.
+
+Given the measured severity — stale data, not a crash — this is not urgent, and
+it should not be started as a quick cleanup. The sequencing that matters:
+**pre-growing the heap addresses the crash class and is independent**, so it can
+be done first and on its own.
+
 ## Measured: the Lua TSNode use-after-free does not crash
 
 Driving it directly rather than reasoning about it. A Lua mapping takes a node,
