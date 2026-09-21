@@ -47,6 +47,40 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
 
+## CI after the fixes, and two entries this file was missing
+
+Three consecutive full E2E runs on master: `fix: blockquote` **passed**,
+`docs: close the RPC inventory entries` **failed**, `test: which-key budget`
+**passed**. The middle one is a docs-only commit, so its failure is by
+definition a flake rather than a regression. No RPC segfault appears in any of
+them, which is the change worth noting — that cluster used to dominate.
+
+The failing run was two macOS shards, and **neither test was in the inventory
+table**, so the list of open entries was incomplete:
+
+| Test                                                         | Spec                         | Platform | Observed |
+| ------------------------------------------------------------ | ---------------------------- | -------- | -------- |
+| `keeps source-rendered frontmatter fully navigable`          | `rpc-keys.e2e.ts`            | macOS    | 1        |
+| `j after Enter cell edit should navigate to next row (#136)` | `table-cell-vim-mode.e2e.ts` | macOS    | 1        |
+
+The frontmatter one carries usable diagnostics: `rows: [7,6,6,6,6,6]` with
+`mode: "source"`, `propertiesInDocument: "visible"` and
+`metadataContainers: 1`. The cursor reaches row 6 and then stalls there for four
+more steps. That is the shape `setPropertiesSource()` exists to prevent — the
+fork's frontmatter interception is meant to be skipped when properties render as
+source text, and a stall on a `.metadata-container` is what happens when it is
+not. So the likely fault is the gating callback reporting the wrong mode, which
+would not be macOS-specific in itself.
+
+It is also worth noting this is an **RPC spec** that failed _after_ the
+tree-sitter fix, and it fails by stalling rather than by segfault, so it is a
+separate defect rather than a survivor of that cluster.
+
+Neither reproduces on Linux: `rpc-keys` and `table-cell-vim-mode` ran eight
+times in the container for 38 passing each, 0 failures, 0 segfaults. Same
+caveat as the other Linux attempts — that bounds the rate, it does not clear
+them, and macOS is the platform that saw them.
+
 ## Reproduction attempt on Linux: none of the five reproduce
 
 All four specs owning the five open entries — `cursor-shapes-runtime`,
