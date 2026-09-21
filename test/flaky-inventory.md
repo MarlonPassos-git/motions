@@ -62,12 +62,27 @@ That is the wrong direction twice over. It leaks, and it drives exactly the
 the one failure here that actually segfaults. The correctness fix for stale
 reads would make the crash class more likely.
 
-So step 2 needs lifetime management rather than deletion removal: free a tree
-when nothing references it, through a `FinalizationRegistry` on the handle
-(fengari already uses one in `lstate.ts` for userdata `__gc`), or by reference
-counting the nodes handed to Lua. Both are real work, both need a way to verify
-that trees are actually freed rather than assumed to be, and neither should be
-attempted without that measurement in place.
+So step 2 needs lifetime management rather than deletion removal. **Both
+mechanisms this file previously proposed for it are unavailable, and the claims
+below were wrong** -- a plan review checked them against the code:
+
+- **Not fengari's `FinalizationRegistry`.** It is armed only in
+  `lua_setmetatable` under `case LUA_TUSERDATA:`, i.e. full userdata. `pushTSTree`
+  and `pushTSNode` both use `lua_pushlightuserdata` stored as a `_tree`/`_node`
+  field on a plain Lua table. Light userdata has no per-value metatable and no
+  `__gc` in Lua 5.3, so the registry never sees these objects.
+- **Not reference counting via `applyTreeRef`.** Query captures carry no tree
+  reference at all: `query-api.ts` calls `pushTSNode` without `applyTreeRef`, so
+  nodes from `iter_captures`/`iter_matches` have no `_tree`. Refcounting would
+  free trees those nodes point into -- reintroducing the bug in the path this
+  file named as the worst case. `iter_children` also leaks its registry ref when
+  user Lua `break`s out, which would become a permanent pin.
+
+Either route is therefore a table-to-full-userdata conversion across 31 node
+methods plus a fengari change, not a detail of one. Given the measured severity
+is stale data rather than a crash, in an opt-in API with no user reports, the
+reviewed recommendation is to **decline it** and fix three real defects instead;
+see `.omo/plans/treesitter-memory-safety.md`.
 
 Given the measured severity — stale data, not a crash — this is not urgent, and
 it should not be started as a quick cleanup. The sequencing that matters:
