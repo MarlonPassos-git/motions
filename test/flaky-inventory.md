@@ -47,6 +47,35 @@ skip on that condition explicitly rather than silently vary.
 | `a config reload closes an open picker instead of leaking it`              | Windows         | 1                       | Unknown. New in `2b6bc75`.                                                                                                                                                                                                                   |
 | `uses the host jumplist for two cross-note older jumps`                    | Windows, Linux  | 2                       | **Focus excluded**: failed with `cmFocused` true and a correct 19-char document.                                                                                                                                                             |
 
+## The frontmatter entry: the planted diagnostic answered it
+
+`keeps source-rendered frontmatter fully navigable` is resolved, and it was a
+test defect rather than a product one.
+
+An earlier session added a diagnostic to this test for exactly this moment: it
+reports what the fork's frontmatter decision is _based on_, "so the next CI run
+separates a mis-read properties mode from a fold or live-preview problem". On
+its first real failure it answered unambiguously — `propertiesInDocument:
+"visible"` in a test that had just called `reconnectInPropertiesMode('source')`.
+Mis-**set**, not mis-read, and therefore neither a fold nor a live-preview
+problem.
+
+The cause is `setPropertiesMode`, which called `setConfig` and then
+`browser.pause(300)` with no check that it landed. When that race is lost the
+walk runs with properties still `visible`, so the fork correctly keeps its
+frontmatter interception, the cursor stalls on the metadata container, and the
+test reports a navigation failure for a setup that had not applied yet. It now
+waits for the setting to read back, with a message naming the setting if it
+never does.
+
+Two things worth taking from it. The diagnostic was worth planting: it converted
+an unreproducible macOS failure into a one-line answer, on a platform nobody
+could bisect. And this is the same unverified-setter shape recorded elsewhere in
+this file — a fixed sleep standing in for a condition nobody checked.
+
+`rpc-keys` runs 4x clean on Linux after the change, though Linux never
+reproduced the failure, so that confirms no regression rather than the fix.
+
 ## CI after the fixes, and two entries this file was missing
 
 Three consecutive full E2E runs on master: `fix: blockquote` **passed**,
