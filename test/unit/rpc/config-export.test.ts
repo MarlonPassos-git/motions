@@ -133,6 +133,24 @@ describe('generated Neovim configuration', () => {
         expect(body).toContain("vim.keymap.set({ 'i', 's' }, '<S-Tab>'");
     });
 
+    // A Windows path is full of backslashes, which a Lua single-quoted string
+    // must double. Getting this wrong fails only on Windows, so it is pinned
+    // here rather than left to a platform-specific CI shard to discover.
+    it('escapes a Windows snippet path so Lua reads it back unchanged', () => {
+        const windowsPath =
+            'D:\\a\\motions\\lua\\vim-motions-snippets\\global.json';
+        const body = generateNeovimConfig({
+            ...BASE,
+            snippets: true,
+            snippetPaths: [windowsPath],
+        });
+        expect(body).not.toContain(windowsPath);
+        const literals = [...body.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map(
+            (match) => (match[1] ?? '').replace(/\\(.)/g, '$1'),
+        );
+        expect(literals).toContain(windowsPath);
+    });
+
     it('emits no snippet block when snippets are disabled', () => {
         expect(generateNeovimConfig(BASE)).not.toContain('luasnip');
     });

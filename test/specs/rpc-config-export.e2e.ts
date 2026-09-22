@@ -105,6 +105,12 @@ async function waitForConnected(): Promise<void> {
     if (pid !== null) spawnedPids.add(pid);
 }
 
+function luaStringLiterals(source: string): string[] {
+    return [...source.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((match) =>
+        (match[1] ?? '').replace(/\\(.)/g, '$1'),
+    );
+}
+
 async function openVimEngineSettings(): Promise<void> {
     await browser.executeObsidian(({ app }) => {
         const setting = (
@@ -288,7 +294,12 @@ return ok and '' or tostring(err)`,
         expect(JSON.parse(readFileSync(snippetFile, 'utf8'))).toHaveProperty(
             'Date ISO',
         );
-        expect(readFileSync(GENERATED_PATH, 'utf8')).toContain(snippetFile);
+        // Compared after unescaping rather than as a raw substring: the path
+        // is embedded in a Lua string literal, so on Windows every separator
+        // is doubled and `D:\a\…` never appears verbatim in the file.
+        expect(
+            luaStringLiterals(readFileSync(GENERATED_PATH, 'utf8')),
+        ).toContain(snippetFile);
     });
 
     // The preview is what makes the install an explicit, informed request, so
