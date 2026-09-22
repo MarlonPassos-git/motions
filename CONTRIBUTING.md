@@ -138,6 +138,7 @@ src/
   rpc/
     companion.lua          # Bundled write/read routing, structural motions, cursor notification, and extmark/fold/float forwarding
     cmdline.ts             # Level-keyed external command-line, prompt, caret, and special-character overlay
+    config-export.ts       # Generated Neovim configuration, sentinel-guarded writes, plugin install/update, and module probing
     decorations.ts         # UI redraw clock, CM6 decoration/fold dispatch, and float notification consumer
     document-sync.ts       # Named acwrite mirror, Obsidian save/read routing, line events, and byte/UTF-16 mapping
     floating-windows.ts    # CM6-metric float positioning, content/extmark overlays, stacking, and cleanup
@@ -154,7 +155,6 @@ src/
   types/
     lua-modules.d.ts       # Text-loader declaration for bundled Lua companion sources
     vim-api.d.ts           # Type declarations for the Vim API (CmAdapter, VimApi, etc.)
-    codemirror-vim.d.ts    # CodeMirror Vim type declarations
     globals.ts             # __DEV__ build-time constant type declaration
   vim/
     vim-api.ts             # getVimApi(), getCmAdapter(), isVimEnabled()
@@ -252,6 +252,7 @@ src/
     vault-search.ts        # :grep vault-wide search implementation
     global-key-handler.ts  # Global key event handling (outside editor) — always installed on desktop; context-gated File Explorer h/j/k/l translation reuses native arrow behavior; mapping gates check focus/modal/leaf-type; dispatch preserves raw builtin counts and partial-match timeouts
     global-mapping-registry.ts  # Registry for global key mappings
+    external-mode.ts       # Backend-reported vim mode for per-mode host rendering and IM switching
     key-observer.ts        # Physical key observation feeding vim.on_key
     global-defaults.ts     # Default global keybindings — always-on (`:`, hints) vs workspace-nav-conditional (scroll, tabs, panes) split via opts.enableWorkspaceNav; gotoNthTab filters to rootSplit leaves only; gf hint binding for context menu action
   easymotion/

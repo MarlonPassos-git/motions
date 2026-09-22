@@ -1,6 +1,13 @@
 import { browser, expect } from '@wdio/globals';
 import { obsidianPage } from 'wdio-obsidian-service';
-import { setupEditor, vimKeys, getCursorPos, PAUSE } from '../helpers';
+import {
+    PAUSE,
+    canvasPaintSupported,
+    ensureWindowFocused,
+    getCursorPos,
+    setupEditor,
+    vimKeys,
+} from '../helpers';
 
 type PluginRef = {
     settings: Record<string, unknown>;
@@ -47,7 +54,7 @@ async function paintedCursorBounds(): Promise<{
         for (let y = 0; y < h; y++) {
             const row = y * w * 4;
             for (let x = 0; x < w; x++) {
-                if (d[row + x * 4 + 3] > 8) {
+                if ((d[row + x * 4 + 3] ?? 0) > 8) {
                     if (x < minX) minX = x;
                     if (y < minY) minY = y;
                     if (y > maxY) maxY = y;
@@ -75,6 +82,47 @@ async function pollPaintedCursor(): Promise<{
     for (let i = 0; i < 20 && !last.painted; i++) {
         await browser.pause(90);
         last = await paintedCursorBounds();
+    }
+    // painted false on its own says only that no pixel was found, which cannot
+    // distinguish a canvas that is absent, mis-sized, hidden, or simply never
+    // drawn on. Focus is already ruled out for this spec: both canvas specs
+    // passed on the unfocused replicas that failed the fold specs.
+    if (!last.painted) {
+        const diagnosis = await browser.executeObsidian(({ app, obsidian }) => {
+            const canvases = Array.from(
+                document.querySelectorAll(
+                    '.vim-motions-animated-cursor-canvas',
+                ),
+            ) as HTMLCanvasElement[];
+            const view = app.workspace.getActiveViewOfType(
+                obsidian.MarkdownView,
+            );
+            return {
+                canvasCount: canvases.length,
+                sizes: canvases.map((c) => `${c.width}x${c.height}`),
+                styleWidths: canvases.map((c) => c.style.width),
+                display: canvases.map((c) => getComputedStyle(c).display),
+                opacity: canvases.map((c) => getComputedStyle(c).opacity),
+                rects: canvases.map((c) => {
+                    const r = c.getBoundingClientRect();
+                    return `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.top)}`;
+                }),
+                docHasFocus: document.hasFocus(),
+                cmFocused: !!document.querySelector('.cm-editor.cm-focused'),
+                reducedMotion: window.matchMedia(
+                    '(prefers-reduced-motion: reduce)',
+                ).matches,
+                devicePixelRatio: window.devicePixelRatio,
+                cursorLine: (() => {
+                    try {
+                        return view?.editor.getCursor().line;
+                    } catch {
+                        return null;
+                    }
+                })(),
+            };
+        });
+        console.log('CURSORDIAG ' + JSON.stringify(diagnosis));
     }
     return last;
 }
@@ -126,8 +174,40 @@ async function setPluginSettings(
 
 describe('Animated cursor', function () {
     before(async function () {
+        if (!(await canvasPaintSupported())) {
+            console.log('SKIP canvas readback unavailable on this runner');
+            this.skip();
+        }
         await browser.reloadObsidian({ vault: 'test-vault' });
         await obsidianPage.openFile('Welcome.md');
+
+        // Must run after reloadObsidian: beforeSuite raises the window before
+        // the spec reloads Obsidian, and the reload discards it. The fold
+        // specs call this after their own load and went from five failures in
+        // eight to none; the canvas specs did not, and kept failing with
+        // document.hasFocus() false.
+        await ensureWindowFocused();
+
+        // The give-up diagnostic only runs on failure, so the failing macOS
+        // replicas reported reducedMotion true and an unfocused window with
+        // nothing to compare against. Report the same fields unconditionally
+        // so passing replicas can discriminate which of the two matters.
+        console.log(
+            'CURSORENV ' +
+                JSON.stringify(
+                    await browser.execute(() => ({
+                        reducedMotion: window.matchMedia(
+                            '(prefers-reduced-motion: reduce)',
+                        ).matches,
+                        docHasFocus: document.hasFocus(),
+                        cmFocused: !!document.querySelector(
+                            '.cm-editor.cm-focused',
+                        ),
+                        devicePixelRatio: window.devicePixelRatio,
+                        window: `${window.innerWidth}x${window.innerHeight}`,
+                    })),
+                ),
+        );
     });
 
     after(async function () {
@@ -234,7 +314,7 @@ describe('Animated cursor', function () {
                 >
             ).__origRaf = orig;
             window.requestAnimationFrame = (cb: FrameRequestCallback) => {
-                (window as unknown as Record<string, number>).__rafCount++;
+                (window as unknown as { __rafCount: number }).__rafCount++;
                 return orig(cb);
             };
         });

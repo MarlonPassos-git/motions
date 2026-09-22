@@ -1,0 +1,202 @@
+name: E2E Stress
+
+# A normal run samples a spec once, so establishing a failure rate or finding
+# the first test that breaks a later one costs one round trip per sample. This
+# runs a single spec repeatedly on one runner and reports the tally, turning
+# twenty round trips into one.
+
+on:
+    workflow_dispatch:
+        inputs:
+            spec:
+                description: 'Spec file(s), comma-separated, run together as one shard'
+                required: true
+                default: 'test/specs/fold-providers.e2e.ts'
+            iterations:
+                description: 'Iterations per job (iteration 1 is the only cold one)'
+                required: true
+                default: '15'
+            parallel:
+                description: 'Parallel jobs, each contributing one cold start'
+                required: true
+                default: '1'
+            variant:
+                description: 'RPC_CYCLE_VARIANT for rpc-connect-cycle (bare, workspace, workspace+source)'
+                required: false
+                default: 'bare'
+            os:
+                description: 'Runner'
+                required: true
+                default: 'macos-latest'
+                type: choice
+                options:
+                    - macos-latest
+                    - windows-latest
+                    - ubuntu-latest
+
+# Neovim writes stdpath('log') only for some levels and the child does not
+# resolve the runner's HOME the way a shell would, so a crash left nothing
+# readable. Obsidian inherits this and spawns the child, so it propagates.
+env:
+    NVIM_LOG_FILE: /tmp/nvim-debug.log
+    # Selects how much of the real hooks' surroundings rpc-connect-cycle adds
+    # back, so the bisect runs where the failure rate is high rather than
+    # locally, where every variant settles.
+    RPC_CYCLE_VARIANT: ${{ inputs.variant }}
+
+jobs:
+    # Only the first iteration of a job is a cold start, and a cold start is
+    # what fails: across six runs every failure was iteration 1, and iteration 1
+    # itself fails roughly two times in three. One job therefore yields one
+    # sample of the interesting case no matter how many iterations it runs, so
+    # replicas are the way to collect several.
+    plan:
+        runs-on: ubuntu-latest
+        outputs:
+            replicas: ${{ steps.mk.outputs.replicas }}
+        steps:
+            - id: mk
+              run: |
+                  n=${{ inputs.parallel }}
+                  list=$(seq 1 "$n" | paste -sd, -)
+                  echo "replicas=[$list]" >> "$GITHUB_OUTPUT"
+                  echo "replicas=[$list]"
+              shell: bash
+
+    stress:
+        needs: plan
+        name: stress ${{ inputs.os }} replica ${{ matrix.replica }}
+        strategy:
+            fail-fast: false
+            matrix:
+                replica: ${{ fromJson(needs.plan.outputs.replicas) }}
+        runs-on: ${{ inputs.os }}
+        timeout-minutes: 350
+        env:
+            CSC_IDENTITY_AUTO_DISCOVERY: false
+
+        steps:
+            - uses: actions/checkout@v6
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: npm
+
+            - name: Install dependencies
+              run: npm install --include=dev
+
+            - name: Install pinned Neovim
+              if: inputs.os != 'windows-latest'
+              run: bash scripts/install-neovim.sh
+
+            - name: Install pinned Neovim on Windows
+              if: inputs.os == 'windows-latest'
+              run: pwsh scripts/install-neovim.ps1
+
+            - name: Fetch test plugins
+              run: bash scripts/fetch-test-plugins.sh
+
+            - name: Build
+              run: npm run build:ci-test
+
+            - name: Start virtual display
+              if: inputs.os == 'ubuntu-latest'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y xvfb herbstluftwm
+                  Xvfb :99 -screen 0 1280x1024x24 &
+                  sleep 3
+                  DISPLAY=:99 herbstluftwm &
+                  sleep 1
+                  echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+            - name: Cache Obsidian
+              uses: actions/cache@v5
+              with:
+                  path: .obsidian-cache
+                  key: obsidian-cache-${{ runner.os }}-${{ hashFiles('manifest.json') }}
+                  restore-keys: obsidian-cache-${{ runner.os }}-
+
+            - name: Stress
+              shell: bash
+              run: |
+                  pass=0
+                  fail=0
+                  : > failing-tests.txt
+                  for i in $(seq 1 ${{ inputs.iterations }}); do
+                    set +e
+                    # Comma-separated so a whole shard can be reproduced: the
+                    # fold failure is ~7% for the spec alone and ~60% alongside
+                    # its shard mates, so companions are part of the condition.
+                    SPEC_ARGS=$(echo '${{ inputs.spec }}' | tr ',' '\n' \
+                      | while read -r sp; do [ -n "$sp" ] && printf ' --spec %s' "$sp"; done)
+                    out=$(npx wdio run ./wdio.conf.mts $SPEC_ARGS 2>&1)
+                    rc=$?
+                    # Windows locks files during obsidian-launcher's atomic
+                    # rename, which e2e.yml retries and this did not: three of
+                    # eight replicas died in setup and were counted as though
+                    # the specs had failed.
+                    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'EPERM'; then
+                      sleep 5
+                      out=$(npx wdio run ./wdio.conf.mts $SPEC_ARGS 2>&1)
+                      rc=$?
+                    fi
+                    set -e
+                    if [ "$rc" -eq 0 ]; then
+                      pass=$((pass + 1))
+                      echo "iteration $i: pass"
+                    else
+                      # The first version captured the output and never printed
+                      # it, so a failing iteration left no evidence in the log.
+                      printf '%s\n' "$out"
+                      fail=$((fail + 1))
+                      echo "iteration $i: FAIL"
+                      printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' \
+                        | grep -aE '^\s*✖' | sed "s/^/  iter $i /" >> failing-tests.txt
+                    fi
+                    # The per-test traces are the point of the run, so keep them
+                    # even when the iteration passed.
+                    printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g' \
+                      | grep -aoE '(FOLDTRACE|FOLDENV|CURSORENV|CURSORDIAG|UIENV|RPCTASKS|RPCCYCLE) \{.*\}' \
+                      | sed "s/^/iter $i /" >> traces.txt || true
+                  done
+
+                  {
+                    echo "### Stress replica ${{ matrix.replica }}: \`${{ inputs.spec }}\` x${{ inputs.iterations }} on ${{ inputs.os }}"
+                    echo
+                    echo "| result | count |"
+                    echo "| --- | --- |"
+                    echo "| pass | $pass |"
+                    echo "| fail | $fail |"
+                    echo
+                    if [ -s /tmp/nvim-debug.log ]; then
+                      echo '<details><summary>Neovim log tail</summary>'
+                      echo
+                      echo '```'
+                      tail -40 /tmp/nvim-debug.log
+                      echo '```'
+                      echo '</details>'
+                    fi
+                    if [ -s failing-tests.txt ]; then
+                      echo '<details><summary>Failing tests</summary>'
+                      echo
+                      echo '```'
+                      sort failing-tests.txt | uniq -c | sort -rn
+                      echo '```'
+                      echo '</details>'
+                    fi
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+                  echo "pass=$pass fail=$fail"
+
+            - name: Upload traces
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: stress-traces-${{ inputs.os }}-${{ matrix.replica }}
+                  path: |
+                      traces.txt
+                      failing-tests.txt
+                  if-no-files-found: ignore

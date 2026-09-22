@@ -314,7 +314,12 @@ describe('Vim toggle command', function () {
             await executeToggleCommand('enable-vim-mode');
         });
 
-        it('rapid toggle is debounced', async function () {
+        // Was 'rapid toggle is debounced', asserting that the enable was
+        // swallowed and Vim ended disabled. Dropping it silently left every
+        // extension-slot feature unregistered until Obsidian reloaded, which
+        // is what broke callout folding on slower machines. Both requests are
+        // now applied in order, so the end state is the one asked for.
+        it('rapid toggle applies both requests and ends enabled', async function () {
             this.timeout(15000);
             await browser.executeObsidian(({ app }) => {
                 const cmds = app as unknown as {
@@ -326,11 +331,11 @@ describe('Vim toggle command', function () {
                 cmds.commands.executeCommandById('vim-motions:enable-vim-mode');
             });
             await browser.pause(TOGGLE_SETTLE);
-            const setting = await getVimEnabledSetting();
-            expect(setting).toBe(false);
-
-            await browser.pause(500);
-            await executeToggleCommand('enable-vim-mode');
+            await browser.waitUntil(
+                async () => (await getVimEnabledSetting()) === true,
+                { timeout: 5000, interval: 200 },
+            );
+            expect(await getVimEnabledSetting()).toBe(true);
         });
     });
 

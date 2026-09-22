@@ -1,6 +1,12 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { browser } from '@wdio/globals';
+// Type-only, erased at runtime. This file uses WebdriverIO.Config and
+// browser.executeObsidian, both of which are `declare global` augmentations
+// that only load if their package is imported. Without these the file reports
+// 22 errors; it reported none only because nothing type-checked it.
+import type {} from 'webdriverio';
+import type {} from 'wdio-obsidian-service';
 
 export const config: WebdriverIO.Config = {
     runner: 'local',
@@ -36,6 +42,15 @@ export const config: WebdriverIO.Config = {
     },
     waitforInterval: 250,
     waitforTimeout: 5000,
+    // A renderer busy longer than the HTTP client's patience kills the
+    // WebDriver session, and the death surfaces in whichever hook runs next
+    // rather than at the call that stalled: rpc-structural-nav reported
+    // UND_ERR_HEADERS_TIMEOUT on execute/sync, then invalid session id in
+    // afterEach, burying the real failure under an unrelated one. A slow
+    // renderer should produce a slow pass; the per-test mocha timeout above
+    // still bounds a genuine hang.
+    connectionRetryTimeout: 180000,
+    connectionRetryCount: 3,
     logLevel: 'warn',
     injectGlobals: false,
 
@@ -49,6 +64,79 @@ export const config: WebdriverIO.Config = {
     },
 
     async beforeSuite() {
+        // Eight cold macOS starts correlated perfectly: the two that failed had
+        // document.hasFocus() false, all six that passed had it true. An
+        // unfocused window means CodeMirror never registers focus, Live Preview
+        // keeps callouts rendered as widgets, and anything asserting on
+        // decorated content fails while the document itself is correct.
+        // Re-calling editor.focus() cannot fix it; the window has to be raised.
+        // A real user's window is focused, so this restores the real condition
+        // rather than skipping the tests.
+        try {
+            const puppeteer = (await (
+                browser as unknown as {
+                    getPuppeteer(): Promise<{ pages(): Promise<unknown[]> }>;
+                }
+            ).getPuppeteer()) as { pages(): Promise<unknown[]> };
+            const pages = await puppeteer.pages();
+            const page = pages[0] as {
+                target(): {
+                    createCDPSession(): Promise<{
+                        send(method: string): Promise<unknown>;
+                    }>;
+                };
+            };
+            const session = await page.target().createCDPSession();
+            await session.send('Page.bringToFront');
+        } catch {
+            /* best effort: without focus the suite still runs, just flakily */
+        }
+
+        // bringToFront addresses the renderer, not the OS window, so it is not
+        // enough on its own. Focus does arrive on a cold start, just not
+        // immediately, so wait for it: measured over eight cold macOS starts
+        // per cluster, document.hasFocus() matched the outcome every time, for
+        // the fold specs and the animated-cursor specs alike. Waiting cleared
+        // the fold failures outright.
+        // window.focus() alone was not enough for the canvas specs; asking
+        // Electron to raise the window is what worked there. Specs that reload
+        // Obsidian discard this and call ensureWindowFocused after their own
+        // load, but specs that do not reload only get this one.
+        try {
+            await browser.waitUntil(
+                async () =>
+                    browser.execute(() => {
+                        if (!document.hasFocus()) {
+                            try {
+                                const electron = (
+                                    window as unknown as {
+                                        require?: (m: string) => unknown;
+                                    }
+                                ).require?.('electron') as
+                                    | {
+                                          remote?: {
+                                              getCurrentWindow?: () => {
+                                                  focus?: () => void;
+                                              };
+                                          };
+                                      }
+                                    | undefined;
+                                electron?.remote
+                                    ?.getCurrentWindow?.()
+                                    ?.focus?.();
+                            } catch {
+                                /* not available in every host */
+                            }
+                            window.focus();
+                        }
+                        return document.hasFocus();
+                    }),
+                { timeout: 5000, interval: 250 },
+            );
+        } catch {
+            /* a window that never gains focus is reported by the specs */
+        }
+
         try {
             const hasToggle = await browser.executeObsidian(({ app }) => {
                 return !!(
@@ -115,7 +203,89 @@ export const config: WebdriverIO.Config = {
         }
     },
 
-    async afterTest() {
+    // Every failing test now reports the discriminators that identified the
+    // clusters we did solve, so a future failure classifies itself instead of
+    // costing a round trip per hypothesis. Focus separated the fold and canvas
+    // clusters; a dead Neovim child separated the RPC ones; document size and
+    // reduced motion each looked decisive until the passing rows excluded
+    // them. Guarded throughout: a failing probe must not replace the failure
+    // it describes.
+    async afterTest(
+        test: { title?: string },
+        _context: unknown,
+        result: { passed?: boolean },
+    ) {
+        if (result && result.passed === false) {
+            try {
+                const diag = await browser.execute(() => {
+                    const canvases = document.querySelectorAll(
+                        '.vim-motions-animated-cursor-canvas',
+                    );
+                    const w = window as unknown as {
+                        app?: {
+                            workspace?: {
+                                activeEditor?: {
+                                    editor?: { getValue(): string };
+                                };
+                            };
+                        };
+                    };
+                    let docLength: number | string = 'n/a';
+                    try {
+                        docLength =
+                            w.app?.workspace?.activeEditor?.editor?.getValue()
+                                .length ?? -1;
+                    } catch (e) {
+                        docLength = `threw: ${String(e)}`;
+                    }
+                    return {
+                        docHasFocus: document.hasFocus(),
+                        cmFocused: !!document.querySelector(
+                            '.cm-editor.cm-focused',
+                        ),
+                        activeEl: document.activeElement?.tagName ?? '?',
+                        calloutWidget: !!document.querySelector(
+                            '.cm-embed-block.cm-callout',
+                        ),
+                        cursorCanvases: canvases.length,
+                        foldPlaceholders: document.querySelectorAll(
+                            '.cm-foldPlaceholder',
+                        ).length,
+                        reducedMotion: window.matchMedia(
+                            '(prefers-reduced-motion: reduce)',
+                        ).matches,
+                        docLength,
+                        window: `${window.innerWidth}x${window.innerHeight}`,
+                        // handleClose already formats the child's exit code or
+                        // signal into a Notice, and NVIM_LOG_FILE stayed empty
+                        // in a local reproduction because Neovim writes that
+                        // log only for some levels. The Notice is the reason
+                        // the plugin itself derived, so read that.
+                        notices: Array.from(
+                            document.querySelectorAll('.notice'),
+                        )
+                            .map((n) => (n.textContent ?? '').slice(0, 120))
+                            .slice(0, 4),
+                    };
+                });
+                console.log(
+                    'FAILDIAG ' +
+                        JSON.stringify({
+                            test: (test?.title ?? '?').slice(0, 60),
+                            ...diag,
+                        }),
+                );
+            } catch (error) {
+                console.log(
+                    'FAILDIAG ' +
+                        JSON.stringify({
+                            test: (test?.title ?? '?').slice(0, 60),
+                            unavailable: String(error).slice(0, 120),
+                        }),
+                );
+            }
+        }
+
         try {
             await browser.executeObsidian(({ app, obsidian }) => {
                 const overlaySelectors = [

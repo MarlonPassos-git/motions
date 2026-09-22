@@ -21,6 +21,20 @@ export function wasmBinaryPlugin(): Plugin {
     };
 }
 
+// Mirrors esbuild's `'.lua': 'text'` loader. Without it nothing under
+// test/unit can import a module that reaches src/rpc/companion.lua, because
+// Vite tries to parse the Lua as JavaScript.
+export function luaTextPlugin(): Plugin {
+    return {
+        name: 'lua-text',
+        enforce: 'pre',
+        load(id: string) {
+            if (!id.endsWith('.lua')) return;
+            return `export default ${JSON.stringify(readFileSync(id, 'utf8'))};`;
+        },
+    };
+}
+
 export const PAUSE = {
     KEY_GAP: 30,
     MODE_SWITCH: 50,
@@ -187,6 +201,59 @@ export async function getRegisterContent(
     )) as { text: string; linewise: boolean } | null;
 }
 
+/**
+ * Try to give the Obsidian window real focus, and report whether it has it.
+ *
+ * An unfocused window is not cosmetic: CodeMirror never registers focus, so
+ * Live Preview keeps callouts rendered as widgets and any assertion about
+ * decorated content fails while the document itself is correct. Measured over
+ * two runs of eight cold macOS starts, document.hasFocus() matched the outcome
+ * 16 times out of 16.
+ *
+ * Page.bringToFront addresses the renderer rather than the OS window and did
+ * not help, so this also asks Electron to raise the window. Callers should
+ * skip rather than fail when it still returns false: a real user's window is
+ * focused, so the failure describes the runner and not the plugin.
+ */
+export async function ensureWindowFocused(): Promise<boolean> {
+    // Sampling focus once skipped six of eight suites that would mostly have
+    // passed: focus often arrives shortly after the workspace loads, well
+    // before the assertions run. Retry for a few seconds and only report
+    // failure when it never arrives.
+    const attempt = async (): Promise<boolean> =>
+        browser.executeObsidian(() => {
+            if (!document.hasFocus()) {
+                try {
+                    const electron = (
+                        window as unknown as {
+                            require?: (m: string) => unknown;
+                        }
+                    ).require?.('electron') as
+                        | {
+                              remote?: {
+                                  getCurrentWindow?: () => {
+                                      focus?: () => void;
+                                  };
+                              };
+                          }
+                        | undefined;
+                    electron?.remote?.getCurrentWindow?.()?.focus?.();
+                } catch {
+                    /* not available in every host */
+                }
+                window.focus();
+            }
+            return document.hasFocus();
+        });
+
+    try {
+        await browser.waitUntil(attempt, { timeout: 5000, interval: 250 });
+        return true;
+    } catch {
+        return attempt();
+    }
+}
+
 export async function setupEditor(
     content: string,
     cursor: { line: number; ch: number },
@@ -240,6 +307,27 @@ export async function setupEditor(
             { timeout: 2000, interval: 50 },
         )
         .catch(() => {});
+    // editor.focus() above does not guarantee CodeMirror has registered focus,
+    // and on a cold start it measurably does not: a failing run recorded the
+    // cursor correctly at line 2 with document.activeElement on .cm-content,
+    // but no .cm-editor.cm-focused. Live Preview keeps a callout rendered as a
+    // widget while the editor is unfocused, so anything asserting on decorated
+    // content fails without the content itself being wrong. Re-focus until
+    // CodeMirror agrees rather than waiting on a consequence of focus.
+    await browser
+        .waitUntil(
+            async () =>
+                browser.executeObsidian(({ app, obsidian }) => {
+                    if (document.querySelector('.cm-editor.cm-focused'))
+                        return true;
+                    app.workspace
+                        .getActiveViewOfType(obsidian.MarkdownView)
+                        ?.editor.focus();
+                    return false;
+                }),
+            { timeout: 3000, interval: 100 },
+        )
+        .catch(() => {});
     await browser.pause(PAUSE.EDITOR_SETTLE);
 }
 
@@ -248,7 +336,9 @@ export async function sendVimEscape(): Promise<void> {
         const Vim = (
             window as unknown as {
                 CodeMirrorAdapter?: {
-                    Vim?: {};
+                    Vim?: {
+                        handleKey: (cm: unknown, key: string) => boolean;
+                    };
                 };
             }
         ).CodeMirrorAdapter?.Vim;
@@ -645,7 +735,16 @@ export async function hasWhichKeyOverlay(): Promise<boolean> {
     })) as boolean;
 }
 
-export async function waitForWhichKey(timeout = 2000): Promise<void> {
+/**
+ * The budget has to be measured from *after* the deferral, not from the
+ * keypress. `<Space>` is a prefix, so the overlay cannot appear until
+ * `operatorshadowtimeout` expires — 1000 ms by default — which left the old
+ * 2000 ms default with 1000 ms of real margin, polled at 100 ms plus an
+ * `executeObsidian` round trip each time. That is thin by construction on a
+ * loaded runner, and `which-key shows after space press` is a standing Windows
+ * flake in test/flaky-inventory.md.
+ */
+export async function waitForWhichKey(timeout = 5000): Promise<void> {
     await browser.waitUntil(
         async () =>
             (await browser.executeObsidian(
@@ -759,6 +858,33 @@ export async function setPluginSetting(
         key,
         value,
     );
+}
+
+/**
+ * Whether this environment can paint a 2D canvas and read the pixels back.
+ *
+ * Checks the mechanism a canvas assertion relies on, deliberately not the
+ * feature under test, so it cannot mask a real defect: a runner that paints
+ * fine still runs the test and still fails it. Measured capability differs
+ * across runners — macOS reports no WebGL context at all where Linux and
+ * Windows report SwiftShader — and a test that cannot run should say so
+ * rather than fail.
+ */
+export async function canvasPaintSupported(): Promise<boolean> {
+    return browser.execute(() => {
+        try {
+            const c = document.createElement('canvas');
+            c.width = 8;
+            c.height = 8;
+            const ctx = c.getContext('2d');
+            if (!ctx) return false;
+            ctx.fillStyle = 'rgba(255,0,0,1)';
+            ctx.fillRect(0, 0, 8, 8);
+            return (ctx.getImageData(0, 0, 8, 8).data[3] ?? 0) > 8;
+        } catch {
+            return false;
+        }
+    });
 }
 
 export async function setPluginSettingAndReload(

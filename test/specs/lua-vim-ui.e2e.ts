@@ -24,6 +24,26 @@ async function consoleHasAsyncError(): Promise<boolean> {
 }
 
 describe('vim.ui', function () {
+    // Reported on every run, passing or failing. Instrumenting only failures
+    // is what kept prefers-reduced-motion alive as a suspect for the canvas
+    // cluster until the passing rows showed it true everywhere. These entries
+    // are focus-adjacent, so measure focus before assuming it.
+    before(async function () {
+        console.log(
+            'UIENV ' +
+                JSON.stringify(
+                    await browser.execute(() => ({
+                        docHasFocus: document.hasFocus(),
+                        cmFocused: !!document.querySelector(
+                            '.cm-editor.cm-focused',
+                        ),
+                        activeEl: `${document.activeElement?.tagName ?? '?'}`,
+                        window: `${window.innerWidth}x${window.innerHeight}`,
+                    })),
+                ),
+        );
+    });
+
     afterEach(async function () {
         await browser.executeObsidian(() => {
             document
@@ -158,11 +178,38 @@ describe('vim.ui', function () {
         );
         await setupEditor('x\n', { line: 0, ch: 0 });
         await vimRawKeys('Q');
-        await browser.pause(PAUSE.EDITOR_SETTLE);
-        expect(await pickerOpen()).toBe(true);
+        // Waited for, not slept on: a fixed settle here cannot tell "the picker
+        // never opened" from "the reload failed to close it", and those are a
+        // test race and the product leak this test exists to catch.
+        await browser.waitUntil(async () => await pickerOpen(), {
+            timeout: 10000,
+            interval: 50,
+            timeoutMsg: 'picker never opened after Q',
+        });
 
         await loadLuaConfig(`vim.opt.scrolloff = 3`);
-        await browser.pause(300);
+        try {
+            await browser.waitUntil(async () => !(await pickerOpen()), {
+                timeout: 10000,
+                interval: 50,
+            });
+        } catch {
+            // A genuine leak still fails, but it fails saying what survived.
+            // This entry has only ever been seen once, on Windows, and cannot
+            // be reproduced locally, so the next failure has to carry its own
+            // evidence.
+            const leaked = await browser.executeObsidian(() => ({
+                pickers: document.querySelectorAll('.vim-motions-picker')
+                    .length,
+                modalContainers:
+                    document.querySelectorAll('.modal-container').length,
+                prompts: document.querySelectorAll('.prompt').length,
+                activeEl: document.activeElement?.className ?? null,
+            }));
+            throw new Error(
+                `picker survived the config reload: ${JSON.stringify(leaked)}`,
+            );
+        }
         expect(await pickerOpen()).toBe(false);
     });
 

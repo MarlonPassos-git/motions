@@ -1,6 +1,12 @@
 import { browser, expect } from '@wdio/globals';
 import { obsidianPage } from 'wdio-obsidian-service';
-import { setupEditor, setPluginSettingAndReload, PAUSE } from '../helpers';
+import {
+    PAUSE,
+    canvasPaintSupported,
+    ensureWindowFocused,
+    setPluginSettingAndReload,
+    setupEditor,
+} from '../helpers';
 
 // Follow-up to https://github.com/saberzero1/motions/issues/181
 //
@@ -81,7 +87,7 @@ async function paintedHeight(): Promise<number> {
         for (let y = 0; y < h; y++) {
             const row = y * w * 4;
             for (let x = 0; x < w; x++) {
-                if (d[row + x * 4 + 3] > 8) {
+                if ((d[row + x * 4 + 3] ?? 0) > 8) {
                     if (y < minY) minY = y;
                     if (y > maxY) maxY = y;
                     break;
@@ -140,6 +146,11 @@ async function pollPaintedHeight(): Promise<number> {
             styleWidths: canvases.map((c) => c.style.width),
             reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)')
                 .matches,
+            // The fold failures turned out to be an unfocused editor keeping
+            // Live Preview widgets rendered. The cursor canvas draws the
+            // cursor, so an unfocused editor is a candidate here too.
+            cmFocused: !!document.querySelector('.cm-editor.cm-focused'),
+            docHasFocus: document.hasFocus(),
             hidden: document.hidden,
             devicePixelRatio: window.devicePixelRatio,
             animatedCursor: picked?.animatedCursor,
@@ -154,9 +165,20 @@ async function pollPaintedHeight(): Promise<number> {
 
 describe('Cursor shapes applied at runtime (#181)', function () {
     before(async function () {
+        if (!(await canvasPaintSupported())) {
+            console.log('SKIP canvas readback unavailable on this runner');
+            this.skip();
+        }
         this.timeout(60000);
         await browser.reloadObsidian({ vault: 'test-vault' });
         await obsidianPage.openFile('Welcome.md');
+
+        // Must run after reloadObsidian: beforeSuite raises the window before
+        // the spec reloads Obsidian, and the reload discards it. The fold
+        // specs call this after their own load and went from five failures in
+        // eight to none; the canvas specs did not, and kept failing with
+        // document.hasFocus() false.
+        await ensureWindowFocused();
     });
 
     after(async function () {
