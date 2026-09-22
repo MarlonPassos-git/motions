@@ -1594,7 +1594,7 @@ When which-key mode is set to "All partial keys" and the popup delay is non-zero
 **Test coverage**: `test/specs/oil-which-key.e2e.ts` — 4 tests covering `g?` help modal, `g.` non-interception, no stale overlay after `g?`, and leader-mode control.
 
 | `vim.lsp.*` / `vim.treesitter.*` | Not applicable to Obsidian |
-| Async Lua (coroutine ↔ Promise bridge) | Deferred — `vim.schedule`, `vim.defer_fn`, and `vim.uv` timer subset are available; full coroutine bridge remains deferred |
+| Async Lua (coroutine ↔ Promise bridge) | Implemented — `src/lua/coroutine-runner.ts` yields a Lua coroutine on an async host call and resumes it with the result, with a 10 s timeout and a 16-coroutine limit. `vim.schedule`, `vim.defer_fn` and the `vim.uv` timer subset are available. Snippet `f()`/`d()` nodes are deliberately blocked from async |
 
 ### ~~Vault file reading~~ (Implemented)
 
@@ -1882,7 +1882,7 @@ See `src/lib/fengari/DIFFERENCES.md` for the full list of changes from upstream.
 
 ### 1. Coroutine↔Promise bridge (async Lua execution)
 
-**Status**: Implemented (Phase 1–3). Callback contexts (keymap, autocmd, timer, user command) are async-capable. Init.lua async (Phase 4) and `require()` (Phase 5) remain deferred.
+**Status**: Implemented. Callback contexts (keymap, autocmd, timer, user command) are async-capable through `src/lua/coroutine-runner.ts`, and `require()` resolves synchronously from the in-memory snapshot in `src/lua/module-snapshot.ts`, so a lazy `require` inside a `vim.keymap.set` callback works. Init.lua itself is still loaded synchronously.
 
 **Current state**: The fengari Lua VM is synchronous — `lua_pcall` runs Lua code to completion before returning to JS. Obsidian's vault API (`app.vault.read()`, `app.vault.cachedRead()`) is asynchronous (returns Promises). This mismatch blocks:
 

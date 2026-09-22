@@ -77,7 +77,7 @@ Full documentation: **https://saberzero1.github.io/motions**
 
 ## Requirements
 
-- Obsidian v1.7.2 or later
+- Obsidian v1.8.7 or later
 - Desktop or mobile (physical keyboard recommended on mobile)
 
 ## Development

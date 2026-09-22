@@ -74,11 +74,13 @@ On Obsidian 1.13+, pages appear as navigable entries in the settings sidebar. On
 > [!info]
 > Ripgrep integration is desktop-only and requires the `rg` binary to be installed on your system.
 
-| Name                           | Type   | Default                      | Range/Options | Lua | Vimrc | Description                                         |
-| ------------------------------ | ------ | ---------------------------- | ------------- | --- | ----- | --------------------------------------------------- |
-| Use ripgrep for grep/live-grep | toggle | `false`                      | —             | —   | —     | Use a local ripgrep binary for faster vault search. |
-| Ripgrep binary path            | text   | `(empty)`                    | —             | —   | —     | Absolute path to the `rg` binary.                   |
-| Ripgrep extra arguments        | text   | `--smart-case --glob "*.md"` | —             | —   | —     | Additional arguments passed to ripgrep.             |
+| Name                           | Type     | Default                      | Range/Options | Lua | Vimrc | Description                                                                                                 |
+| ------------------------------ | -------- | ---------------------------- | ------------- | --- | ----- | ----------------------------------------------------------------------------------------------------------- |
+| Use ripgrep for grep/live-grep | toggle   | `false`                      | —             | —   | —     | Use a local ripgrep binary for faster vault search.                                                         |
+| Ripgrep binary path            | text     | `(empty)`                    | —             | —   | —     | Absolute path to the `rg` binary.                                                                           |
+| Ripgrep extra arguments        | text     | `--smart-case --glob "*.md"` | —             | —   | —     | Additional arguments passed to ripgrep.                                                                     |
+| Grep binary mode               | dropdown | `ripgrep`                    | —             | —   | —     | Which external binary backs grep and live grep: `ripgrep` or GNU `grep`.                                    |
+| Picker keymap                  | list     | `(built-in)`                 | —             | —   | —     | Per-context key bindings for the picker modal. Editable from Lua; see [[ex-commands]] for the provider API. |
 
 ## Vim engine
 
@@ -242,7 +244,7 @@ The following options are available via vimrc and Lua but do not appear in the S
 ## Cursor shapes
 
 > [!info]
-> Cursor shapes require bundled fork mode. Disable Obsidian's built-in Vim key bindings to enable these options.
+> Cursor shapes require the bundled fork engine or the Neovim backend. Disable Obsidian's built-in Vim key bindings to enable these options.
 
 | Name             | Type     | Default     | Range/Options                         | Lua | Vimrc           | Description                             |
 | ---------------- | -------- | ----------- | ------------------------------------- | --- | --------------- | --------------------------------------- |
