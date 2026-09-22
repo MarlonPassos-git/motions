@@ -239,6 +239,30 @@ describe('writing the generated configuration', () => {
         expect(target.writes).toHaveLength(1);
     });
 
+    // The written file and the reference to it must be the same string.
+    // Windows opens either spelling, so a mismatch is invisible at runtime.
+    it('references a bundled snippet with one separator on Windows', async () => {
+        const target = host();
+        await exportNeovimConfig(target, 'D:\\cfg\\init.lua', {
+            ...BASE,
+            snippets: true,
+            snippetPaths: ['vim-motions-snippets/global.json'],
+        });
+        const config = target.writes.find((write) =>
+            write.path.endsWith('vim_motions.lua'),
+        );
+        const bundled = target.writes.find((write) =>
+            write.path.endsWith('global.json'),
+        );
+        expect(bundled?.path).toBe(
+            'D:\\cfg\\lua\\vim-motions-snippets\\global.json',
+        );
+        expect(config?.contents).toContain(
+            "'D:\\\\cfg\\\\lua\\\\vim-motions-snippets\\\\global.json'",
+        );
+        expect(config?.contents).not.toContain('vim-motions-snippets/');
+    });
+
     it('refuses to overwrite a file the user has taken over', async () => {
         const target = host({
             readFile: async () => 'return { my = "own config" }',

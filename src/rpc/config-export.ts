@@ -317,10 +317,15 @@ export async function exportNeovimConfig(
     // the vault, not the configuration directory these files were written to.
     const resolved: ConfigExportSettings = {
         ...settings,
+        // Split on either separator before rejoining: a relative path arrives
+        // with a literal `/`, so joining it as-is on Windows references the
+        // file as `…\lua\vim-motions-snippets/global.json` while it was
+        // written to the all-backslash form. Windows opens both, so the only
+        // symptom is two spellings of one path.
         snippetPaths: settings.snippetPaths.map((snippetPath) =>
             isAbsolutePath(snippetPath)
                 ? snippetPath
-                : [root, snippetPath].join(separator),
+                : [root, ...snippetPath.split(/[\\/]/)].join(separator),
         ),
     };
     const written = await host.writeFile(path, generateNeovimConfig(resolved));
