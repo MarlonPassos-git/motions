@@ -44,4 +44,8 @@ test-vault/lua/mini/
 .omo/
 .omc/
 test-vault/lua/flash/
+test-vault/lua/luasnip/
 !test-vault/lua/uiselect_shim.lua
+
+# Written by the Neovim configuration-export e2e spec
+test/fixtures/nvim/lua/

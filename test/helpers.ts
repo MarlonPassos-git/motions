@@ -21,6 +21,20 @@ export function wasmBinaryPlugin(): Plugin {
     };
 }
 
+// Mirrors esbuild's `'.lua': 'text'` loader. Without it nothing under
+// test/unit can import a module that reaches src/rpc/companion.lua, because
+// Vite tries to parse the Lua as JavaScript.
+export function luaTextPlugin(): Plugin {
+    return {
+        name: 'lua-text',
+        enforce: 'pre',
+        load(id: string) {
+            if (!id.endsWith('.lua')) return;
+            return `export default ${JSON.stringify(readFileSync(id, 'utf8'))};`;
+        },
+    };
+}
+
 export const PAUSE = {
     KEY_GAP: 30,
     MODE_SWITCH: 50,

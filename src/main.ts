@@ -1,4 +1,11 @@
-import { MarkdownView, Notice, Platform, Plugin, apiVersion } from 'obsidian';
+import {
+    FileSystemAdapter,
+    MarkdownView,
+    Notice,
+    Platform,
+    Plugin,
+    apiVersion,
+} from 'obsidian';
 import {
     DEFAULT_SETTINGS,
     CommandLabel,
@@ -251,7 +258,11 @@ import {
     clearAutocmdEventCallbacks,
     setAutocmdEventHoldDelay,
 } from './vim/autocmd-event-watcher';
-import { expandTilde } from './util/external-fs';
+import {
+    expandTilde,
+    readExternalFile,
+    writeExternalFile,
+} from './util/external-fs';
 import {
     openPathInDefaultApp,
     parentDirOf,
@@ -288,6 +299,22 @@ import {
     type NeovimConnectionState,
     resolveNeovimBinaryPath,
 } from './rpc/neovim-connection';
+import type { NeovimEditorOptions } from './rpc/document-sync';
+import { getExternalVimMode } from './vim/external-mode';
+import {
+    BUNDLED_SNIPPET_FILES,
+    SNIPPET_DIRECTORY,
+    configFingerprint,
+    exportNeovimConfig,
+    generateNeovimConfig,
+    installPlugins,
+    probeModules,
+    referencedModules,
+    referencedRepos,
+    type ConfigExportSettings,
+    type ExportHost,
+    type ExportOutcome,
+} from './rpc/config-export';
 const MAX_PERSISTED_UNDO_TREES = 50;
 
 const TOGGLE_COOLDOWN_MS = 500;
@@ -372,6 +399,7 @@ export default class VimMotionsPlugin extends Plugin {
     private snippetTabSlot: Extension[] = [];
     private neovimConnection!: NeovimConnection;
     private neovimReconcileOperation = 0;
+    private neovimAutoExportFailureReported = false;
     private snippetRuntimeSlot: Extension[] = [];
     private slotExtensionCache = new Map<string, Extension>();
     private toggleInProgress = false;
@@ -773,6 +801,7 @@ export default class VimMotionsPlugin extends Plugin {
                     : null;
             },
             () => this.modeTracker,
+            () => this.leaderRegistry?.getLeaderKey() ?? '\\',
         );
         await this.loadSettings();
         // A marker that survived a restart means the renderer died while the
@@ -3484,6 +3513,7 @@ export default class VimMotionsPlugin extends Plugin {
 
     reloadFeatures(): void {
         this.reconcileNeovimConnection();
+        this.maybeAutoExportNeovimConfig();
         if (!this.settings.vimEnabled) return;
         if (this.autocmdManager?.isFiring()) {
             this.autocmdManager.deferReload();
@@ -3895,8 +3925,8 @@ export default class VimMotionsPlugin extends Plugin {
                 state.binaryPath === resolvedPath &&
                 state.configPath === resolvedConfigPath
             ) {
-                await this.neovimConnection.setTextwidth(
-                    this.settings.textwidth,
+                await this.neovimConnection.setEditorOptions(
+                    this.neovimEditorOptions(),
                 );
                 return;
             }
@@ -3912,10 +3942,169 @@ export default class VimMotionsPlugin extends Plugin {
             await this.neovimConnection.connect(
                 binaryPath,
                 configPath,
-                this.settings.textwidth,
+                this.neovimEditorOptions(),
             );
             this.applyTreesitterBridgeSlot();
         }
+    }
+
+    /**
+     * Mode the connected backend reports, which the animated cursor's shape
+     * and input-method switching read instead of the stood-down fork's own
+     * state. Null when the fork owns keys.
+     */
+    getExternalVimModeState(): string | null {
+        return getExternalVimMode();
+    }
+
+    // The generated config is read by Neovim, which cannot resolve a
+    // vault-relative path, so the user's snippet directory is made absolute
+    // here. The bundled files are written beside the config instead, because
+    // they live inside main.js and are not on disk at all.
+    private neovimSnippetPaths(): string[] {
+        const paths: string[] = [];
+        if (this.settings.snippetBundled)
+            for (const name of Object.keys(BUNDLED_SNIPPET_FILES))
+                paths.push(`${SNIPPET_DIRECTORY}/${name}`);
+        const directory = this.settings.snippetDirectory.trim();
+        const adapter = this.app.vault.adapter;
+        if (directory && adapter instanceof FileSystemAdapter)
+            paths.push(`${adapter.getBasePath()}/${directory}`);
+        return paths;
+    }
+
+    neovimConfigExportSettings(): ConfigExportSettings {
+        return {
+            leaderKey: this.leaderRegistry?.getLeaderKey() ?? '\\',
+            textwidth: this.settings.textwidth,
+            snippets: this.settings.enableSnippets,
+            snippetPaths: this.neovimSnippetPaths(),
+            surround: true,
+            dial: this.settings.enableDial,
+            subwordMotions: this.settings.enableSubwordMotions,
+            yankRing: this.settings.enableYankRing,
+            flash: this.settings.enableFlash,
+            easyMotion: this.settings.enableEasyMotion,
+            replaceWithRegister: this.settings.enableReplaceWithRegister,
+        };
+    }
+
+    private neovimExportHost(): ExportHost {
+        return {
+            request: (method, args) =>
+                this.neovimConnection.request(method, args),
+            readFile: (path) => readExternalFile(path),
+            writeFile: (path, contents) => writeExternalFile(path, contents),
+        };
+    }
+
+    isNeovimConfigExportStale(): boolean {
+        const fingerprint = this.settings.neovimConfigExportFingerprint;
+        return (
+            fingerprint !== '' &&
+            fingerprint !== configFingerprint(this.neovimConfigExportSettings())
+        );
+    }
+
+    generateNeovimConfigText(): string {
+        return generateNeovimConfig(this.neovimConfigExportSettings());
+    }
+
+    async exportNeovimConfigFile(): Promise<ExportOutcome> {
+        if (!this.neovimConnection.isConnected())
+            return {
+                status: 'failed',
+                reason: 'Connect the Neovim backend first so its configuration directory can be resolved.',
+            };
+        const settings = this.neovimConfigExportSettings();
+        const outcome = await exportNeovimConfig(
+            this.neovimExportHost(),
+            this.settings.neovimConfigPath,
+            settings,
+        );
+        if (outcome.status === 'written') {
+            this.settings.neovimConfigExportFingerprint =
+                configFingerprint(settings);
+            await this.saveSettings();
+        }
+        return outcome;
+    }
+
+    private maybeAutoExportNeovimConfig(): void {
+        if (!this.settings.neovimConfigExportAutoRefresh) return;
+        if (!this.isNeovimConfigExportStale()) return;
+        if (!this.neovimConnection.isConnected()) return;
+        // A refused or failed write leaves the fingerprint stale, so this runs
+        // again on the next reload. Report it once: otherwise the toggle looks
+        // enabled while silently doing nothing.
+        void this.exportNeovimConfigFile().then((outcome) => {
+            if (outcome.status === 'written') {
+                this.neovimAutoExportFailureReported = false;
+                return;
+            }
+            if (this.neovimAutoExportFailureReported) return;
+            this.neovimAutoExportFailureReported = true;
+            new Notice(
+                outcome.status === 'foreign'
+                    ? `Vim Motions: ${outcome.path} was edited by hand, so automatic regeneration left it alone.`
+                    : `Vim Motions: automatic regeneration failed. ${outcome.reason}`,
+                10000,
+            );
+        });
+    }
+
+    async planNeovimSetup(): Promise<{
+        configText: string;
+        repos: string[];
+        missing: string[];
+        connected: boolean;
+    }> {
+        const settings = this.neovimConfigExportSettings();
+        const connected = this.neovimConnection.isConnected();
+        const present = connected ? await this.probeNeovimConfigModules() : {};
+        const missing = Object.entries(present)
+            .filter(([, loadable]) => !loadable)
+            .map(([name]) => name)
+            .sort();
+        return {
+            configText: generateNeovimConfig(settings),
+            repos: referencedRepos(settings),
+            missing,
+            connected,
+        };
+    }
+
+    async applyNeovimSetup(): Promise<ExportOutcome & { install?: string }> {
+        if (!this.neovimConnection.isConnected())
+            return {
+                status: 'failed',
+                reason: 'Connect the Neovim backend first.',
+            };
+        const install = await installPlugins(
+            this.neovimExportHost(),
+            referencedRepos(this.neovimConfigExportSettings()),
+        );
+        const outcome = await this.exportNeovimConfigFile();
+        return install.ok ? outcome : { ...outcome, install: install.error };
+    }
+
+    async probeNeovimConfigModules(): Promise<Record<string, boolean>> {
+        if (!this.neovimConnection.isConnected()) return {};
+        return probeModules(
+            this.neovimExportHost(),
+            referencedModules(this.neovimConfigExportSettings()),
+        );
+    }
+
+    private neovimEditorOptions(): NeovimEditorOptions {
+        return {
+            textwidth: this.settings.textwidth,
+            listContinuation: this.settings.listContinuationOnOpen,
+            yankHighlight: {
+                mode: this.settings.yankHighlightMode,
+                duration: this.settings.yankHighlightDuration,
+            },
+        };
     }
 
     private rebuildExSuggest(): void {

@@ -61,6 +61,10 @@ const EXCLUDED_SETTINGS_KEYS = new Set([
     'neovimRpcEnabled',
     'neovimBinaryPath',
     'neovimConfigPath',
+    'neovimConfigExportAutoRefresh',
+    // Machine-written state: the fingerprint of the settings the generated
+    // Neovim file was last produced from, not a user-editable preference.
+    'neovimConfigExportFingerprint',
 
     // Nested objects — configured via dedicated commands or sub-options
     'modePrompts', // via `let g:mode_prompt_*`

@@ -7,6 +7,7 @@ import {
     NeovimDocumentSync,
     neovimByteToUtf16,
     utf16ToNeovimByte,
+    type NeovimEditorOptions,
 } from './document-sync';
 import { NeovimKeyDelegation } from './key-delegation';
 import { NeovimDecorationBridge } from './decorations';
@@ -20,6 +21,7 @@ import {
 } from './obsidian-feature-bridge';
 import type { VimRegistration } from '../vim/registration';
 import type { VimModeTracker } from '../vim/mode-tracker';
+import { neovimModeToVimMode, setExternalVimMode } from '../vim/external-mode';
 import { NeovimModeStatus } from './mode-status';
 
 type ProcessError = Error & { code?: string | number; signal?: string | null };
@@ -129,6 +131,33 @@ export function resolveNeovimBinaryPath(configuredPath: string): string {
     return trimmed ? expandTilde(trimmed) : 'nvim';
 }
 
+// The only filesystem path this may carry is the user's own neovimConfigPath.
+// Nothing derived from pluginAutoFetch, which writes into the vault's lua/
+// tree, may reach Neovim's runtimepath: that would make the plugin install
+// executable dependencies for the real runtime, which the Developer Policies
+// forbid. test/unit/rpc/plugin-autofetch-boundary.test.ts holds this.
+export function buildNeovimSpawnArgs(configPath: string | null): string[] {
+    const args = ['--embed', '--headless'];
+    if (configPath) {
+        args.push(
+            '--clean',
+            '--cmd',
+            `lua vim.opt.runtimepath:prepend(${JSON.stringify(parentDirOf(configPath))})`,
+            // --clean strips the user packpath, which silently breaks
+            // vim.pack: it clones the plugin to disk and then never puts it on
+            // the runtimepath, so require() still fails. Measured. Restoring
+            // only the standard site directory re-enables packages without
+            // bringing back the wrapper-injected runtimepath that --clean is
+            // here to exclude.
+            '--cmd',
+            "lua vim.opt.packpath:append(vim.fs.joinpath(vim.fn.stdpath('data'), 'site'))",
+            '-u',
+            configPath,
+        );
+    }
+    return args;
+}
+
 export class NeovimConnection {
     private child: ChildProcessHandle | null = null;
     private rpc: MsgpackRpcClient | null = null;
@@ -159,12 +188,13 @@ export class NeovimConnection {
         ) => HostNavigationTarget | null = () => null,
         private readonly getModeTracker: () => VimModeTracker | null = () =>
             null,
+        private readonly getLeaderKey: () => string = () => '\\',
     ) {}
 
     async connect(
         configuredPath: string,
         configuredConfigPath: string,
-        textwidth: number,
+        editorOptions: NeovimEditorOptions,
     ): Promise<boolean> {
         if (!Platform.isDesktop) return false;
         const binaryPath = resolveNeovimBinaryPath(configuredPath);
@@ -185,16 +215,7 @@ export class NeovimConnection {
 
         let child: ChildProcessHandle;
         try {
-            const args = ['--embed', '--headless'];
-            if (configPath) {
-                args.push(
-                    '--clean',
-                    '--cmd',
-                    `lua vim.opt.runtimepath:prepend(${JSON.stringify(parentDirOf(configPath))})`,
-                    '-u',
-                    configPath,
-                );
-            }
+            const args = buildNeovimSpawnArgs(configPath);
             child = getChildProcess().spawn(binaryPath, args, {
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
@@ -237,7 +258,7 @@ export class NeovimConnection {
             const documentSync = new NeovimDocumentSync(
                 this.app,
                 rpc,
-                textwidth,
+                editorOptions,
             );
             this.documentSync = documentSync;
             await documentSync.start();
@@ -251,8 +272,13 @@ export class NeovimConnection {
                 typeof initialMode === 'object' &&
                 initialMode !== null &&
                 typeof (initialMode as { mode?: unknown }).mode === 'string'
-            )
+            ) {
                 this.mode = (initialMode as { mode: string }).mode;
+                // Published here as well as on every key, so the per-mode host
+                // features do not read the stood-down fork in the window
+                // between connecting and the first keystroke.
+                setExternalVimMode(neovimModeToVimMode(this.mode));
+            }
             const decorationBridge = new NeovimDecorationBridge(
                 rpc,
                 documentSync,
@@ -283,6 +309,7 @@ export class NeovimConnection {
                 this.getRegistration,
                 channelId,
                 this.getNavigationTarget,
+                this.getLeaderKey,
             );
             this.featureBridge = featureBridge;
             await featureBridge.start();
@@ -292,6 +319,7 @@ export class NeovimConnection {
                 documentSync,
                 (mode) => {
                     this.mode = mode;
+                    setExternalVimMode(neovimModeToVimMode(mode));
                 },
             );
             keyDelegation.start();
@@ -355,8 +383,8 @@ export class NeovimConnection {
         return this.rpc.request(method, args);
     }
 
-    async setTextwidth(textwidth: number): Promise<void> {
-        await this.documentSync?.setTextwidth(textwidth);
+    async setEditorOptions(options: NeovimEditorOptions): Promise<void> {
+        await this.documentSync?.setEditorOptions(options);
     }
 
     isKeyDelegating(): boolean {
@@ -569,6 +597,7 @@ export class NeovimConnection {
         this.connected = false;
         this.apiLevel = null;
         this.mode = null;
+        setExternalVimMode(null);
         this.binaryPath = null;
         this.configPath = null;
         this.expectedExit = false;
