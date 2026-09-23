@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Which-key overlay no longer opens on a literal-argument leader key** — `r<leader>`, and any other command awaiting a literal `<character>` argument (`f`, `t`, `m`, `q`, `"`), opened the leader overlay when the leader key was used as that argument. The fork signals `vim-keypress` only after it has consumed the argument, so the key was indistinguishable from a standalone leader press; the overlay now carries the previous key's `expectLiteralNext` state across the event and skips leader handling when the key was consumed as an argument. ([#186](https://github.com/saberzero1/motions/issues/186))
+    - Plugin: `src/ui/which-key.ts`, `src/types/vim-api.d.ts`
+
 ## [1.0.0] - 2026-09-22
 
 ### Added

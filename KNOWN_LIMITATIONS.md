@@ -802,6 +802,14 @@ Root cause: the codemirror-vim fork normalizes literal space characters to `<Spa
 
 Fix: added `normalizeVimKey()` mirroring the fork's `normalizeKeyString`, applied at label storage time in `rebuildWhichKey()` and at lookup time in `showLeaderBindings()`/`showCompletions()`. Added `normalizedLeaderKey` for key event comparison in `onKeyPressLeaderOnly()`.
 
+### ~~Leader overlay triggered by a literal-argument key~~ (Fixed)
+
+**Status**: Fixed. `onKeyPress()` carries the previous key's `expectLiteralNext` state forward and skips leader handling when the key was consumed as a literal argument. ([#186](https://github.com/saberzero1/motions/issues/186))
+
+With space as the leader, `r<Space>` replaced the character under the cursor and then opened the leader overlay as if `<Space>` had been pressed on its own. The overlay was not a real leader press — a following `<leader>w` did not complete an EasyMotion sequence — so the hint contradicted the actual key state. The same applied to every command that waits for a literal `<character>`: `f`, `t`, `m`, `q`, `"`. Replace mode (`R`) was unaffected, because the overlay already dismisses in insert mode.
+
+Root cause: the fork buffers `r` as a partial match, sets `expectLiteralNext`, and signals `vim-keypress` only after the argument key has been consumed and the input state cleared. At the time the overlay sees the argument key, `expectLiteralNext` and the key buffer are already reset, so it is indistinguishable from a standalone leader press. Checking vim state at event time cannot work; the state must be remembered from the previous key. The key buffer is also checked at consumption time, so a pending `r` cleared by a blur does not swallow a later genuine leader press.
+
 ### Automatic obcommand description resolution
 
 Mappings to `:obcommand <id><CR>` or `:ob <id><CR>` without an explicit `desc` now auto-resolve to Obsidian's native command name in the which-key popup. For example, `vim.keymap.set("n", "<leader>r", ":ob app:go-back<CR>")` displays "Navigate back" instead of the raw `:ob app:go-back<CR>` string. This works for both editor which-key (leader bindings) and global which-key (`:gmap` bindings). Explicit `desc` options always take priority. Unknown command IDs (e.g., from uninstalled plugins) fall back to the raw string. Descriptions are automatically localized to match the user's Obsidian language setting. ([#62](https://github.com/saberzero1/motions/issues/62))
