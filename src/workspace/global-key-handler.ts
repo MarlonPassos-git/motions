@@ -63,6 +63,7 @@ export class GlobalKeyHandler {
     private timer: number | null = null;
     private lastActiveDoc: Document | null = null;
     private translatedFileExplorerEvents = new WeakSet<KeyboardEvent>();
+    private fileExplorerDocs = new WeakSet<Document>();
 
     onGlobalChord?: (
         chord: string,
@@ -97,6 +98,22 @@ export class GlobalKeyHandler {
             },
         );
         this.cleanups.push(() => this.app.workspace.offref(ref));
+        const activeLeafRef = this.app.workspace.on(
+            'active-leaf-change',
+            (leaf) => {
+                for (const doc of this.docs) {
+                    if (
+                        leaf?.view.getViewType() === 'file-explorer' &&
+                        leaf.view.containerEl.ownerDocument === doc
+                    ) {
+                        this.fileExplorerDocs.add(doc);
+                    } else {
+                        this.fileExplorerDocs.delete(doc);
+                    }
+                }
+            },
+        );
+        this.cleanups.push(() => this.app.workspace.offref(activeLeafRef));
     }
 
     private installOnDocument(doc: Document): void {
@@ -104,9 +121,27 @@ export class GlobalKeyHandler {
         this.docs.add(doc);
 
         const handler = (e: KeyboardEvent) => this.onKeydown(e, doc);
+        const trackPointer = (e: PointerEvent) => {
+            if (this.isFileExplorerTarget(e.target)) {
+                this.fileExplorerDocs.add(doc);
+            } else {
+                this.fileExplorerDocs.delete(doc);
+            }
+        };
+        const trackFocus = (e: FocusEvent) => {
+            if (this.isFileExplorerTarget(e.target)) {
+                this.fileExplorerDocs.add(doc);
+            } else {
+                this.fileExplorerDocs.delete(doc);
+            }
+        };
         doc.addEventListener('keydown', handler, true);
+        doc.addEventListener('pointerdown', trackPointer, true);
+        doc.addEventListener('focusin', trackFocus, true);
         this.cleanups.push(() => {
             doc.removeEventListener('keydown', handler, true);
+            doc.removeEventListener('pointerdown', trackPointer, true);
+            doc.removeEventListener('focusin', trackFocus, true);
         });
     }
 
@@ -209,7 +244,16 @@ export class GlobalKeyHandler {
         return GLOBAL_NAV_VIEW_TYPES;
     }
 
-    private translateFileExplorerNavigation(
+    private isFileExplorerTarget(target: EventTarget | null): boolean {
+        return (
+            !!target &&
+            this.app.workspace
+                .getLeavesOfType('file-explorer')
+                .some((leaf) => leaf.view.containerEl.contains(target as Node))
+        );
+    }
+
+    private handleFileExplorerNavigation(
         e: KeyboardEvent,
         doc: Document,
     ): boolean {
@@ -223,27 +267,53 @@ export class GlobalKeyHandler {
         )
             return false;
         if (isEditorOrInputFocused(doc) || isModalOpen(doc)) return false;
+        // Obsidian's tree keeps its own selection while keydown targets BODY.
+        // Track the last sidebar interaction so a ribbon click cannot reuse a
+        // stale active leaf. getMostRecentLeaf() favors the main area here.
         if (
-            this.app.workspace.activeLeaf?.view.getViewType() !==
-            'file-explorer'
+            !this.isFileExplorerTarget(e.target) &&
+            !this.fileExplorerDocs.has(doc)
         )
             return false;
 
+        if (this.countActive && e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.count = this.count * 10 + parseInt(e.key, 10);
+            this.startTimeout();
+            this.updateChord(doc);
+            return true;
+        }
+        if (!this.countActive && e.key >= '1' && e.key <= '9') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.count = parseInt(e.key, 10);
+            this.countActive = true;
+            this.startTimeout();
+            this.updateChord(doc);
+            return true;
+        }
+
         const arrowKey = FILE_EXPLORER_ARROW_KEYS.get(e.key);
         const KeyboardEventCtor = doc.defaultView?.KeyboardEvent;
-        if (!arrowKey || !KeyboardEventCtor || !e.target) return false;
+        const target = e.target;
+        if (!arrowKey || !KeyboardEventCtor || !target) return false;
 
         e.preventDefault();
         e.stopImmediatePropagation();
 
-        const arrowEvent = new KeyboardEventCtor('keydown', {
-            key: arrowKey,
-            code: arrowKey,
-            bubbles: true,
-            cancelable: true,
-        });
-        this.translatedFileExplorerEvents.add(arrowEvent);
-        e.target.dispatchEvent(arrowEvent);
+        const repeat = this.countActive ? this.count : 1;
+        for (let i = 0; i < repeat; i++) {
+            const arrowEvent = new KeyboardEventCtor('keydown', {
+                key: arrowKey,
+                code: arrowKey,
+                bubbles: true,
+                cancelable: true,
+            });
+            this.translatedFileExplorerEvents.add(arrowEvent);
+            target.dispatchEvent(arrowEvent);
+        }
+        if (this.countActive) this.resetSequence();
         return true;
     }
 
@@ -286,8 +356,7 @@ export class GlobalKeyHandler {
         if (e.isComposing) return;
         if (
             this.keyBuffer.length === 0 &&
-            !this.countActive &&
-            this.translateFileExplorerNavigation(e, doc)
+            this.handleFileExplorerNavigation(e, doc)
         )
             return;
 
