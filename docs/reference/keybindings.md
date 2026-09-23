@@ -340,7 +340,7 @@ Navigate Obsidian panes, tabs, and history following Neovim conventions.
 
 | Keybinding            | Description                                                   | Global |
 | --------------------- | ------------------------------------------------------------- | ------ |
-| `h` / `j` / `k` / `l` | Native File Explorer: parent/next/previous/child navigation   | Yes    |
+| `h` / `j` / `k` / `l` | Native File Explorer: parent/next/previous/child; counts work | Yes    |
 | `<C-w>h/j/k/l`        | Focus pane left/down/up/right                                 | Yes    |
 | `<C-w>v`              | Split vertical                                                | Yes    |
 | `<C-w>s`              | Split horizontal                                              | Yes    |

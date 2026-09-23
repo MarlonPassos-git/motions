@@ -9,17 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Native File Explorer Vim navigation** — when workspace navigation is enabled and the native File Explorer is active, unmodified `h`/`j`/`k`/`l` reuse its existing arrow-key behavior: move to or collapse the parent, select the next or previous visible item, and expand or enter a folder. Rename inputs, contenteditable controls, composition, modified keys, modals, editors, and other view types continue to receive their original keystrokes.
-    - Plugin: `src/workspace/global-key-handler.ts` (context gate, same-document arrow translation, and synthetic-event observation guard)
+- **Native File Explorer Vim navigation** — when workspace navigation is enabled and the native File Explorer is focused, unmodified `h`/`j`/`k`/`l` reuse its existing arrow-key behavior: move to or collapse the parent, select the next or previous visible item, and expand or enter a folder. Numeric prefixes repeat the movement (`3j` moves three rows). Rename controls, composition, modified keys, modals, editors, and other views retain their original keystrokes.
+    - Plugin: `src/workspace/global-key-handler.ts` (interaction tracking, counted same-document arrow translation, and synthetic-event observation guard)
+
+### Fixed
+
+- **File Explorer focus and chord isolation** — keyboard events targeting `BODY` still navigate the selected tree after an explorer interaction, while clicking outside the tree stops navigation. Pane chords such as `<C-w>h` retain their original meaning. ([#191](https://github.com/saberzero1/motions/pull/191))
+    - Plugin: `src/workspace/global-key-handler.ts` (tracks explorer interactions and leaves pending chords to the global mapping handler)
+- **Wayland E2E window isolation** — `npm run test:e2e` starts a separate Xvfb display on Wayland and removes inherited Wayland socket access before launching Obsidian, so test windows cannot take focus in the desktop session. Startup fails if Xvfb is unavailable. ([#191](https://github.com/saberzero1/motions/pull/191))
+    - Plugin: `scripts/run-e2e-isolated.mjs`, `package.json` (isolated E2E launcher)
 
 ### Tests
 
-- **File Explorer navigation coverage** — 9 focused unit cases cover the four arrow translations, their workspace-setting/modifier/input/view gates, and suppression of the translated arrow from physical-key observers; 4 Obsidian E2E scenarios exercise `h`/`j`/`k`/`l` against the native File Explorer. Negative controls observed no dispatch for each missing translation, unchanged `Alpha.md`/`Beta.md` focus for `j`/`k`, unchanged expanded/collapsed folder state for `h`/`l`, and observer output changing from `['j']` to `['j', '<ArrowDown>']` when the synthetic-event guard was removed; bypassing the gates changed every protected unit case from `0/0/0` to `1/1/1` prevent/stop/dispatch calls.
+- **File Explorer navigation coverage** — 13 focused unit cases cover arrow translation, count prefixes, focus gates, and physical-key observation; 7 Obsidian E2E scenarios cover `h`/`j`/`k`/`l`, rename typing, `<C-w>h`, and `3j`. Negative controls observed rename text staying `Alpha` instead of including `jkhl`, `<C-w>h` selecting the parent folder instead of `Alpha.md`, and a one-arrow `3j` selecting `Beta.md` instead of `Gamma.md`. Removing all four translations failed all four movement scenarios.
 
 ### Documentation
 
-- `README.md`, `docs/features/workspace-navigation.md`, `docs/reference/keybindings.md`: native File Explorer `h`/`j`/`k`/`l` behavior, activation gate, and editable-control exclusions.
-- `AGENTS.md`, `CONTRIBUTING.md`: `GlobalKeyHandler` ownership of contextual File Explorer arrow translation.
+- `README.md`, `docs/features/workspace-navigation.md`, `docs/reference/keybindings.md`: native File Explorer navigation, counts, focus gate, and editable-control exclusions.
+- `AGENTS.md`, `CONTRIBUTING.md`: File Explorer key handling and isolated E2E launcher on Wayland.
 - `CHANGELOG.md`: implementation, tests, negative controls, and documentation coverage for File Explorer Vim navigation.
 
 ## [1.0.0] - 2026-09-22
