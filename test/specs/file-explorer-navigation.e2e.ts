@@ -1,4 +1,5 @@
 import { browser, expect } from '@wdio/globals';
+import { Key } from 'webdriverio';
 import { obsidianPage } from 'wdio-obsidian-service';
 
 import { PAUSE } from '../helpers';
@@ -6,25 +7,20 @@ import { PAUSE } from '../helpers';
 const ROOT = 'File Explorer Navigation';
 const ALPHA = `${ROOT}/Alpha.md`;
 const BETA = `${ROOT}/Beta.md`;
+const GAMMA = `${ROOT}/Gamma.md`;
+const DELTA = `${ROOT}/Delta.md`;
 
-async function focusExplorerPath(path: string): Promise<string> {
-    return (await browser.executeObsidian(({ app }, targetPath: string) => {
+async function focusExplorerLeafAndReadSelection(): Promise<string> {
+    return (await browser.executeObsidian(({ app }) => {
         const leaf = app.workspace.getLeavesOfType('file-explorer')[0];
         if (!leaf) return '';
-
-        const item = Array.from(
-            leaf.view.containerEl.querySelectorAll<HTMLElement>(
-                '.nav-file-title[data-path], .nav-folder-title[data-path]',
-            ),
-        ).find((candidate) => candidate.dataset.path === targetPath);
-        if (!item) return '';
 
         app.workspace.setActiveLeaf(leaf, { focus: true });
         const focusedItem = leaf.view.containerEl.querySelector<HTMLElement>(
             '.tree-item-self.has-focus[data-path]',
         );
         return focusedItem?.dataset.path ?? '';
-    }, path)) as string;
+    })) as string;
 }
 
 async function getFocusedExplorerPath(): Promise<string> {
@@ -56,16 +52,19 @@ async function revealExplorerFile(path: string): Promise<void> {
     });
     await browser.pause(PAUSE.EDITOR_SETTLE);
     await browser.waitUntil(
-        async () => (await focusExplorerPath(path)) === path,
+        async () => (await focusExplorerLeafAndReadSelection()) === path,
         { timeout: 5000, interval: 100 },
     );
+    await browser.$('.tree-item-self.has-focus[data-path]').click();
 }
 
 describe('File explorer vim navigation', function () {
-    before(async function () {
+    beforeEach(async function () {
         await browser.reloadObsidian({ vault: 'test-vault' });
         await obsidianPage.write(ALPHA, 'alpha');
         await obsidianPage.write(BETA, 'beta');
+        await obsidianPage.write(GAMMA, 'gamma');
+        await obsidianPage.write(DELTA, 'delta');
         await browser.executeObsidian(async ({ app }) => {
             await app.workspace.ensureSideLeaf('file-explorer', 'left', {
                 active: true,
@@ -85,24 +84,27 @@ describe('File explorer vim navigation', function () {
     it('uses j to move to the next visible file row', async function () {
         await revealExplorerFile(ALPHA);
         await browser.keys(['j']);
-        await browser.pause(PAUSE.KEY_GAP);
-        expect(await getFocusedExplorerPath()).toBe(BETA);
+        await browser.waitUntil(
+            async () => (await getFocusedExplorerPath()) === BETA,
+        );
+        await expect(await getFocusedExplorerPath()).toBe(BETA);
     });
 
     it('uses k to move to the previous visible file row', async function () {
         await revealExplorerFile(BETA);
         await browser.keys(['k']);
-        await browser.pause(PAUSE.KEY_GAP);
-        expect(await getFocusedExplorerPath()).toBe(ALPHA);
+        await browser.waitUntil(
+            async () => (await getFocusedExplorerPath()) === ALPHA,
+        );
+        await expect(await getFocusedExplorerPath()).toBe(ALPHA);
     });
 
     it('uses h to select the parent and collapse it', async function () {
         await revealExplorerFile(ALPHA);
         await browser.keys(['h']);
-        await browser.pause(PAUSE.KEY_GAP);
         await browser.keys(['h']);
-        await browser.pause(PAUSE.KEY_GAP);
-        expect(await isFolderCollapsed(ROOT)).toBe(true);
+        await browser.waitUntil(async () => isFolderCollapsed(ROOT));
+        await expect(await isFolderCollapsed(ROOT)).toBe(true);
     });
 
     it('uses l to expand the selected folder', async function () {
@@ -114,7 +116,48 @@ describe('File explorer vim navigation', function () {
             interval: 50,
         });
         await browser.keys(['l']);
-        await browser.pause(PAUSE.KEY_GAP);
-        expect(await isFolderCollapsed(ROOT)).toBe(false);
+        await browser.waitUntil(async () => !(await isFolderCollapsed(ROOT)));
+        await expect(await isFolderCollapsed(ROOT)).toBe(false);
+    });
+
+    it('keeps typed navigation letters in the rename control', async function () {
+        await revealExplorerFile(ALPHA);
+        await browser.keys(['F2']);
+        await browser.waitUntil(async () =>
+            browser.execute(() =>
+                Boolean(
+                    document.activeElement?.closest<HTMLElement>(
+                        '.nav-file-title-content',
+                    )?.isContentEditable,
+                ),
+            ),
+        );
+
+        await browser.keys(['j', 'k', 'h', 'l']);
+        const renameText = await browser.execute(
+            () => document.activeElement?.textContent ?? '',
+        );
+        await expect(renameText).toContain('jkhl');
+        await browser.keys(['Escape']);
+    });
+
+    it('keeps the explorer row unchanged for the <C-w>h pane chord', async function () {
+        await revealExplorerFile(ALPHA);
+        await browser.keys([Key.Control, 'w']);
+        await browser.keys(['h']);
+
+        await expect(await getFocusedExplorerPath()).toBe(ALPHA);
+        await expect(await isFolderCollapsed(ROOT)).toBe(false);
+    });
+
+    it('moves three rows for 3j', async function () {
+        await revealExplorerFile(ALPHA);
+        await browser.keys(['3']);
+        await browser.keys(['j']);
+
+        await browser.waitUntil(
+            async () => (await getFocusedExplorerPath()) !== ALPHA,
+        );
+        await expect(await getFocusedExplorerPath()).toBe(GAMMA);
     });
 });

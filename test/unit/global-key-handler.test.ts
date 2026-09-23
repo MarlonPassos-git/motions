@@ -20,17 +20,29 @@ import { executeCommand } from '../../src/workspace/navigation';
 type KeydownListener = (e: Partial<KeyboardEvent>) => void;
 
 let capturedListener: KeydownListener | null = null;
+let pointerListener: ((e: Partial<PointerEvent>) => void) | null = null;
 let activeViewType = 'graph';
 let focusedElement: Element | null = null;
+let targetInsideExplorer = true;
 let settings: VimMotionsSettings;
 
 class MockKeyboardEvent {
+    type: string;
     key: string;
     code: string;
     bubbles: boolean;
     cancelable: boolean;
 
-    constructor(_type: string, init: KeyboardEventInit) {
+    constructor(
+        type: string,
+        init: {
+            key?: string;
+            code?: string;
+            bubbles?: boolean;
+            cancelable?: boolean;
+        },
+    ) {
+        this.type = type;
         this.key = init.key ?? '';
         this.code = init.code ?? '';
         this.bubbles = init.bubbles ?? false;
@@ -40,8 +52,9 @@ class MockKeyboardEvent {
 
 function makeMockDoc(): Document {
     return {
-        addEventListener: (_type: string, listener: KeydownListener) => {
-            capturedListener = listener;
+        addEventListener: (type: string, listener: KeydownListener) => {
+            if (type === 'keydown') capturedListener = listener;
+            if (type === 'pointerdown') pointerListener = listener;
         },
         removeEventListener: () => {},
         get activeElement() {
@@ -61,6 +74,18 @@ function makeApp(mockDoc: Document): App {
             activeLeaf: {
                 view: { getViewType: () => activeViewType },
             },
+            getLeavesOfType: (type: string) =>
+                type === activeViewType
+                    ? [
+                          {
+                              view: {
+                                  containerEl: {
+                                      contains: () => targetInsideExplorer,
+                                  },
+                              },
+                          },
+                      ]
+                    : [],
             getMostRecentLeaf: () => ({
                 view: { getViewType: () => activeViewType },
             }),
@@ -112,8 +137,10 @@ describe('GlobalKeyHandler', () => {
     beforeEach(() => {
         vi.useFakeTimers();
         capturedListener = null;
+        pointerListener = null;
         activeViewType = 'graph';
         focusedElement = null;
+        targetInsideExplorer = true;
         const mockDoc = makeMockDoc();
         const app = makeApp(mockDoc);
         settings = makeSettings();
@@ -136,7 +163,9 @@ describe('GlobalKeyHandler', () => {
             ['l', 'ArrowRight'],
         ])('translates %s to %s for the active file explorer', (key, arrow) => {
             activeViewType = 'file-explorer';
-            const dispatchEvent = vi.fn(() => true);
+            const dispatchEvent = vi.fn(
+                (_event: Partial<KeyboardEvent>) => true,
+            );
 
             const event = pressKey(key, {
                 target: { dispatchEvent },
@@ -154,6 +183,7 @@ describe('GlobalKeyHandler', () => {
                 stopped: 1,
                 dispatched: 1,
                 arrowEvent: {
+                    type: 'keydown',
                     key: arrow,
                     code: arrow,
                     bubbles: true,
@@ -174,7 +204,10 @@ describe('GlobalKeyHandler', () => {
             pressKey('j', { target: { dispatchEvent } });
             stopObserving();
 
-            expect(observedKeys).toEqual(['j']);
+            expect({
+                observedKeys,
+                dispatched: dispatchEvent.mock.calls.length,
+            }).toEqual({ observedKeys: ['j'], dispatched: 1 });
         });
 
         const blockedContexts: Array<
@@ -183,7 +216,7 @@ describe('GlobalKeyHandler', () => {
                 {
                     settingsEnabled?: boolean;
                     event?: Record<string, unknown>;
-                    focused?: Element;
+                    focused?: Partial<HTMLElement>;
                     viewType?: string;
                 },
             ]
@@ -201,12 +234,25 @@ describe('GlobalKeyHandler', () => {
                 },
             ],
             ['another view is active', { viewType: 'markdown' }],
+            ['the key target is outside the explorer', {}],
+            [
+                'a contenteditable rename control is focused',
+                {
+                    focused: {
+                        tagName: 'DIV',
+                        closest: () => null,
+                        isContentEditable: true,
+                    },
+                },
+            ],
         ];
 
         it.each(blockedContexts)(
             'leaves h/j/k/l alone when %s',
             (_name, context) => {
                 activeViewType = context.viewType ?? 'file-explorer';
+                targetInsideExplorer =
+                    _name !== 'the key target is outside the explorer';
                 focusedElement = (context.focused ?? null) as Element | null;
                 if (context.settingsEnabled === false) {
                     settings.enableWorkspaceNav = false;
@@ -227,6 +273,37 @@ describe('GlobalKeyHandler', () => {
                 }).toEqual({ prevented: 0, stopped: 0, dispatched: 0 });
             },
         );
+
+        it('repeats j for a count in the file explorer', () => {
+            activeViewType = 'file-explorer';
+            const dispatchEvent = vi.fn(
+                (_event: Partial<KeyboardEvent>) => true,
+            );
+            pressKey('3', { target: { dispatchEvent } });
+
+            const event = pressKey('j', { target: { dispatchEvent } });
+
+            expect(
+                dispatchEvent.mock.calls.map(([arrow]) => arrow.key),
+            ).toEqual(['ArrowDown', 'ArrowDown', 'ArrowDown']);
+            expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+        });
+
+        it('uses the last explorer interaction for body-targeted keys and clears it on an outside click', () => {
+            activeViewType = 'file-explorer';
+            const dispatchEvent = vi.fn(
+                (_event: Partial<KeyboardEvent>) => true,
+            );
+            pointerListener!({ target: new EventTarget() });
+            targetInsideExplorer = false;
+
+            pressKey('j', { target: { dispatchEvent } });
+            expect(dispatchEvent).toHaveBeenCalledOnce();
+
+            pointerListener!({ target: new EventTarget() });
+            pressKey('j', { target: { dispatchEvent } });
+            expect(dispatchEvent).toHaveBeenCalledOnce();
+        });
     });
 
     describe('dispatch count for builtin actions', () => {
