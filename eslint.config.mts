@@ -18,6 +18,7 @@ export default defineConfig(
         'version-bump.mjs',
         'scripts/report-latency.mjs',
         'scripts/report-e2e-failures.mjs',
+        'scripts/run-e2e-isolated.mjs',
         'scripts/typecheck-tests.mjs',
         'versions.json',
         'main.js',
