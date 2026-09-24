@@ -149,7 +149,7 @@ When Obsidian's native File Explorer is active, unmodified `h`/`j`/`k`/`l` reuse
 - `k`: Select the previous visible file or folder.
 - `l`: Expand the selected folder, or enter its first child.
 
-Prefix a movement with a count to repeat it, for example `3j` moves three visible rows.
+Prefix a movement with a count to repeat it, for example `3j` moves three visible rows. Counts above 100 are capped at 100 movements so a large prefix cannot freeze the interface.
 
 These contextual aliases are enabled by **Settings → Vim Motions → Workspace navigation**. They operate after the File Explorer receives focus or a pointer interaction, even when Obsidian sends the keyboard event to the document body. Clicking outside the explorer clears that context. They do not run while renaming a file or folder, while another input or contenteditable control is focused, during composition, with a modifier key, or during a pending chord such as `<C-w>h`. The translated arrow event stays in the File Explorer's document, so the same native behavior works in Obsidian windows without reimplementing its tree logic.
 
