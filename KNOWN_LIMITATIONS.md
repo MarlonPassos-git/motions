@@ -125,6 +125,39 @@ With **Neovim configuration path** empty, the backend runs the supplied Neovim b
 
 `buildNeovimSpawnArgs()` in `src/rpc/neovim-connection.ts` is the whole argv surface, and the only filesystem path it can carry is the user's configured `neovimConfigPath`. `test/unit/rpc/plugin-autofetch-boundary.test.ts` asserts the complete argv, so any added `runtimepath` entry fails it, and separately asserts that no file under `src/rpc/` imports the fetch or store modules or names their on-disk paths. This is risk R-5 in the design plan, held by a test rather than by an argument.
 
+### The visual selection is a decoration, not an Obsidian selection
+
+Neovim's visual selection is rendered as a CM6 decoration while CM6's own selection stays the caret Neovim reports. Mirroring it into `EditorSelection` was measured and rejected: with a non-empty selection in the editor, Obsidian consumes the Escape keydown before the RPC delegation listener on `contentDOM` sees it, so visual mode could be entered and never left. Neovim stayed in `v` across `<Esc>`, clearing the DOM range did not help, and disabling the mirroring restored `n`.
+
+The consequence is that Obsidian features which read the editor's selection do not see a visual selection — Neovim owns the selection semantics in this mode, as it owns text and cursor. `test/specs/rpc-visual-selection.e2e.ts` pins both halves, so an attempt to "simplify" the decoration into a real selection fails on the caret assertion and on the Escape assertion rather than silently reintroducing the defect.
+
+Blockwise selections become one range per row and their columns are byte offsets rather than display cells, so a block spanning rows of differing width is approximate in the same way as the rest of the bridge's terminal-cell mapping.
+
+### ~~Per-mode cursor shape does not follow Neovim unless the animated cursor is on~~ (Fixed)
+
+The fork now exposes `setExternalCursorMode()`, which `setExternalVimMode()` forwards to, so the cursor follows the backend's mode with **Animated cursor** off. Two constraints on that export are load-bearing and were established by measurement, not preference:
+
+- **It must not write `cm.state.vim`.** That state is shared with the status bar and the mode tracker.
+- **It must not redraw with a transaction.** `refreshExternalMode()` uses `requestMeasure`, which is a measurement pass; a dispatched transaction disturbs the RPC composition input.
+
+An earlier host-side attempt violated both and turned `rpc-ime.e2e.ts` and `rpc-lifecycle.e2e.ts` from 5 and 13 passing into 3 and 2 failures. Those two specs are the regression gate for any further cursor work, and neither is obviously cursor-related.
+
+Two facts worth keeping for anyone touching this: the insert cursor is the **native caret, not a fat cursor** — `measureCursor()` computes `showCursor = !insertMode || overwrite || shape !== 'bar'`, so a bar shape draws no element and `caret-color` is set instead, and a test must assert the absence of `.cm-fat-cursor` plus a non-transparent caret. And an external mode change produces no `ViewUpdate` of its own, so the fork keeps a registry of live `BlockCursorPlugin` instances to refresh; `update()` alone never sees it.
+
+### `vim.lsp.enable()` attaches to the mirror buffer only on the first activation
+
+A native LSP workflow already crosses the bridge without new bridge code, and `test/specs/rpc-lsp-capability.e2e.ts` measures it against an in-process server: server-provided completion items render in the external popup menu, `vim.lsp.buf.hover()` renders as a float, and diagnostic `virtual_text` and `underline` render as CM6 decorations carrying Neovim's own highlight groups. The mirror buffer is named with the note's absolute vault path, so a server's root resolution has a real path to work from.
+
+The declarative attach path is nonetheless fragile. `vim.lsp.enable()` attaches on `FileType` and skips any buffer whose `'buftype'` is already set. `activateDocument()` runs `filetype detect` before it applies `buftype=acwrite`, so the first activation attaches — but the mirror buffer is reused and renamed for every subsequent note, and by then `buftype` is `acwrite`, so every later `FileType` is skipped. Measured on Neovim 0.12.5: with `buftype` empty at `FileType` a client attaches, with `buftype=acwrite` none does, and `vim.lsp.start()` attaches to that same `acwrite` buffer. The spec pins both the gap and that `vim.lsp.start()` positive control.
+
+The practical consequences are that a config-time `vim.lsp.enable()` is the only declarative form that works, that an LSP enabled later in a session silently does nothing until reconnect, and that the per-activation rename is not accompanied by `didClose`/`didOpen`, so a server's document URI goes stale when the note changes. Moving the `buftype` assignment ahead of `filetype detect` would close the first two; the rename needs a document-lifecycle notification the bridge does not yet send.
+
+### The decoration bridge carries three extmark fields and drops the rest
+
+`ForwardedExtmark` in `src/rpc/decorations.ts` carries `hl_group` (including layered arrays), `virt_text` with `overlay`, `eol` and `inline` positions, and `priority`. `virt_lines`, `sign_text`/`sign_hl_group`, `line_hl_group`/`number_hl_group` and `conceal` are parsed by nothing and therefore render as nothing. Unlike the screen-cell class above this is a gap rather than a boundary: these are ordinary persistent extmark fields that the existing redraw-time forwarding already sees.
+
+`test/specs/rpc-native-capability.e2e.ts` pins each case, pairing every "does not render" assertion with a same-namespace, same-position `virt_text` positive control so the absence cannot be satisfied by forwarding being broken outright. The fields decide real features: diagnostic `signs` need `sign_text`, diagnostic `virtual_lines` and 0.12 code lens need `virt_lines`, and whole-line diagnostic or debugger highlighting needs `line_hl_group`.
+
 ### Neovim plugin compatibility is decided by mechanism, not by plugin
 
 Plugins run inside the user's own Neovim, so loading is never the question. The bridge transports buffer coordinates and never reconstructs Neovim's screen grid, which is attached only as a redraw clock. Anything a plugin expresses as persistent extmarks, virtual text, or floating windows crosses; anything it expresses in screen cells cannot.

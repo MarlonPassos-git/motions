@@ -6,6 +6,7 @@ import {
     type EventRef,
 } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
+import type { Text } from '@codemirror/state';
 import {
     byteToUtf16,
     utf16ToByte,
@@ -17,6 +18,7 @@ import { getEditorView } from '../util/editor';
 import { showYankHighlight } from '../vim/yank-highlight';
 import { NeovimFrontmatterFold } from './frontmatter-fold';
 import type { MsgpackRpcClient } from './msgpack-rpc';
+import { setVisualSelection, type VisualRange } from './visual-selection';
 
 export interface NeovimEditorOptions {
     textwidth: number;
@@ -102,12 +104,42 @@ if yankHighlight then
 end
 `;
 
+// Undo history belongs to the buffer, and one buffer mirrors every note, so a
+// plain nvim_buf_set_lines leaves the previous note's history reachable from
+// the next one. Undo is not merely wrong there, it destroys data: the oldest
+// entry is the buffer's original empty state, so `u` on a freshly opened note
+// empties it, the line events mirror that into CM6, and Obsidian autosaves it.
+// Reseeding at undolevels = -1 discards the history instead. Reading the option
+// yields -123456 ("use the global value") when no buffer-local value is set, so
+// saving and restoring it does not pin a local value.
+const RESEED_BUFFER_LUA = `
+local buf, lines = ...
+local undolevels = vim.bo[buf].undolevels
+vim.bo[buf].undolevels = -1
+vim.api.nvim_buf_set_lines(buf, 0, -1, true, lines)
+vim.bo[buf].undolevels = undolevels
+`;
+
 export function neovimByteToUtf16(text: string, column: number): number {
     return byteToUtf16(text, column as ByteCol);
 }
 
 export function utf16ToNeovimByte(text: string, column: number): number {
     return utf16ToByte(text, column as Utf16Col);
+}
+
+export type VisualKind = 'char' | 'line' | 'block';
+
+function clampLine(doc: Text, line: number): number {
+    return Math.max(1, Math.min(Math.trunc(line), doc.lines));
+}
+
+function charLength(doc: Text, offset: number): number {
+    if (offset >= doc.length) return 0;
+    const codePoint = doc
+        .sliceString(offset, Math.min(doc.length, offset + 2))
+        .codePointAt(0);
+    return codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
 }
 
 function changedSpan(
@@ -156,6 +188,8 @@ export class NeovimDocumentSync {
     private disposed = false;
     private failureReported = false;
     private buffer: number | null = null;
+    private mirrorObserver: (() => void) | null = null;
+    private visualShown = false;
     private readonly frontmatterFold: NeovimFrontmatterFold;
 
     constructor(
@@ -249,6 +283,15 @@ export class NeovimDocumentSync {
         return this.buffer;
     }
 
+    /**
+     * Notified once CM6 holds Neovim's text and cursor. Overlays that anchor to
+     * the cursor cannot use the redraw event that spawned them, because that
+     * event and these notifications share one unordered stream.
+     */
+    setMirrorObserver(observer: (() => void) | null): void {
+        this.mirrorObserver = observer;
+    }
+
     async setEditorOptions(options: NeovimEditorOptions): Promise<void> {
         this.editorOptions = options;
         await this.applyEditorOptions();
@@ -325,9 +368,91 @@ export class NeovimDocumentSync {
         return Math.min(line.from + column, line.to);
     }
 
+    /**
+     * Mirrors Neovim's visual selection.
+     *
+     * Neovim's charwise and linewise selections include the character under the
+     * head; a CM6 range does not include its `to`, so the end that carries the
+     * cursor is extended by one character. Extending by a fixed 1 would split a
+     * surrogate pair, so the extension measures the code point.
+     *
+     * Blockwise selections become one range per row, which is what CM6 can
+     * represent. The columns are byte offsets rather than display cells, so a
+     * block over rows of differing width is approximate in the same way the
+     * rest of the bridge's cell mapping is.
+     */
+    syncSelection(
+        anchor: [number, number],
+        head: [number, number],
+        kind: VisualKind,
+    ): void {
+        const editorView = this.editorView;
+        if (!editorView) return;
+        const ranges = this.visualRanges(editorView, anchor, head, kind);
+        this.visualShown = ranges.length > 0;
+        this.dispatchCursor(editorView, head[0], head[1], ranges);
+    }
+
+    private visualRanges(
+        editorView: EditorView,
+        anchor: [number, number],
+        head: [number, number],
+        kind: VisualKind,
+    ): VisualRange[] {
+        const doc = editorView.state.doc;
+        if (kind === 'line') {
+            const first = doc.line(
+                clampLine(doc, Math.min(anchor[0], head[0])),
+            );
+            const last = doc.line(clampLine(doc, Math.max(anchor[0], head[0])));
+            return [{ from: first.from, to: last.to }];
+        }
+        if (kind === 'block') {
+            const ranges: VisualRange[] = [];
+            const firstRow = Math.min(anchor[0], head[0]);
+            const lastRow = Math.max(anchor[0], head[0]);
+            for (let row = firstRow; row <= lastRow; row += 1) {
+                const left = this.bufferPositionToOffset(row - 1, anchor[1]);
+                const right = this.bufferPositionToOffset(row - 1, head[1]);
+                if (left === null || right === null) continue;
+                const lineEnd = doc.line(clampLine(doc, row)).to;
+                const trailing = Math.max(left, right);
+                ranges.push({
+                    from: Math.min(left, right),
+                    to: Math.min(lineEnd, trailing + charLength(doc, trailing)),
+                });
+            }
+            return ranges;
+        }
+        const anchorOffset = this.bufferPositionToOffset(
+            anchor[0] - 1,
+            anchor[1],
+        );
+        const headOffset = this.bufferPositionToOffset(head[0] - 1, head[1]);
+        if (anchorOffset === null || headOffset === null) return [];
+        const trailing = Math.max(anchorOffset, headOffset);
+        return [
+            {
+                from: Math.min(anchorOffset, headOffset),
+                to: trailing + charLength(doc, trailing),
+            },
+        ];
+    }
+
     syncCursor(line: number, byteColumn: number): void {
         const editorView = this.editorView;
         if (!editorView) return;
+        const clearing = this.visualShown;
+        this.visualShown = false;
+        this.dispatchCursor(editorView, line, byteColumn, clearing ? [] : null);
+    }
+
+    private dispatchCursor(
+        editorView: EditorView,
+        line: number,
+        byteColumn: number,
+        ranges: VisualRange[] | null,
+    ): void {
         const lineNumber = Math.max(
             1,
             Math.min(Math.trunc(line), editorView.state.doc.lines),
@@ -338,8 +463,10 @@ export class NeovimDocumentSync {
             selection: {
                 anchor: Math.min(lineInfo.from + column, lineInfo.to),
             },
+            effects: ranges === null ? [] : [setVisualSelection.of(ranges)],
             scrollIntoView: true,
         });
+        this.mirrorObserver?.();
     }
 
     async waitForActivation(): Promise<void> {
@@ -369,12 +496,9 @@ export class NeovimDocumentSync {
             await this.rpc.request('nvim_buf_set_name', [buffer, name]);
             await this.rpc.request('nvim_set_current_buf', [buffer]);
             await this.rpc.request('nvim_command', ['filetype detect']);
-            await this.rpc.request('nvim_buf_set_lines', [
-                buffer,
-                0,
-                -1,
-                true,
-                lines,
+            await this.rpc.request('nvim_exec_lua', [
+                RESEED_BUFFER_LUA,
+                [buffer, lines],
             ]);
             await this.rpc.request('nvim_set_option_value', [
                 'buftype',
@@ -494,6 +618,7 @@ export class NeovimDocumentSync {
             editorView.dispatch({ changes: { from, to, insert } });
         if (editorView.state.doc.toString() !== this.mirror.join('\n'))
             throw new Error('Neovim line event produced a divergent document');
+        this.mirrorObserver?.();
     }
 
     private reportFailure(error: unknown): void {

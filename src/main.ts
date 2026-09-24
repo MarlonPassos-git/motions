@@ -118,6 +118,7 @@ import {
 import { extmarkExtension } from './lua/extmarks';
 import { decorationProviderExtension } from './lua/decoration-provider';
 import { neovimDecorationExtension } from './rpc/decorations';
+import { neovimVisualSelectionExtension } from './rpc/visual-selection';
 import {
     foldSyncExtension,
     setFoldAwareNavigation,
@@ -2798,6 +2799,7 @@ export default class VimMotionsPlugin extends Plugin {
         this.vimExtensionSlot.push(extmarkExtension());
         this.vimExtensionSlot.push(decorationProviderExtension());
         this.vimExtensionSlot.push(neovimDecorationExtension());
+        this.vimExtensionSlot.push(neovimVisualSelectionExtension());
         this.vimExtensionSlot.push(createTableCellCursorGuard());
         this.vimExtensionSlot.push(
             createTableNavExtension(this.app, this.settings, getVimApi),
