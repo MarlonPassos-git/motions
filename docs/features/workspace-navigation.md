@@ -116,7 +116,7 @@ Control Markdown folding with standard Vim fold commands:
 
 The uppercase fold commands (`zO`, `zC`, `zA`, `zD`) operate recursively on all folds within the cursor's fold region, while the lowercase variants (`zo`, `zc`, `za`, `zd`) operate on a single fold level.
 
-In addition to heading-level folds, the plugin provides dedicated fold providers for **frontmatter** (`---` blocks) and **callouts** (`> [!type]`), making them foldable via `zc`/`zo`/`za`. Folded regions show descriptive placeholder text including the heading title, code language, or callout type.
+In addition to heading-level folds, the plugin provides dedicated fold providers for **frontmatter** (`---` blocks) and **callouts** (`> [!type]`), making them foldable via `zc`/`zo`/`za`. Folded regions show descriptive placeholder text: the code language, callout type, or frontmatter field count, each with the folded line count. A folded heading shows only `— N lines`, because a heading fold starts at the end of its heading line, so the title is still on screen beside the placeholder.
 
 When the treesitter bridge is available, heading folds and heading/code placeholder labels use parsed Markdown metadata. Heading ranges include nested subsections but exclude trailing blank lines and the next same-level heading. ATX headings indented by up to three spaces are recognized; heading-like text inside fenced code blocks is not treated as a heading by the plugin's provider. Before the parser is ready, or if it is unavailable, the existing regex fallback remains in use. Frontmatter and callout folding keep their existing precedence and labels.
 
