@@ -21,6 +21,7 @@ type KeydownListener = (e: Partial<KeyboardEvent>) => void;
 
 let capturedListener: KeydownListener | null = null;
 let pointerListener: ((e: Partial<PointerEvent>) => void) | null = null;
+let focusListener: ((e: Partial<FocusEvent>) => void) | null = null;
 let activeViewType = 'graph';
 let focusedElement: Element | null = null;
 let targetInsideExplorer = true;
@@ -55,6 +56,7 @@ function makeMockDoc(): Document {
         addEventListener: (type: string, listener: KeydownListener) => {
             if (type === 'keydown') capturedListener = listener;
             if (type === 'pointerdown') pointerListener = listener;
+            if (type === 'focusin') focusListener = listener;
         },
         removeEventListener: () => {},
         get activeElement() {
@@ -138,6 +140,7 @@ describe('GlobalKeyHandler', () => {
         vi.useFakeTimers();
         capturedListener = null;
         pointerListener = null;
+        focusListener = () => {};
         activeViewType = 'graph';
         focusedElement = null;
         targetInsideExplorer = true;
@@ -289,11 +292,26 @@ describe('GlobalKeyHandler', () => {
             expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
         });
 
+        it('caps repeated explorer movement to avoid blocking the UI', () => {
+            activeViewType = 'file-explorer';
+            const dispatchEvent = vi.fn(
+                (_event: Partial<KeyboardEvent>) => true,
+            );
+            for (const digit of '9999') {
+                pressKey(digit, { target: { dispatchEvent } });
+            }
+
+            pressKey('j', { target: { dispatchEvent } });
+
+            expect(dispatchEvent).toHaveBeenCalledTimes(100);
+        });
+
         it('uses the last explorer interaction for body-targeted keys and clears it on an outside click', () => {
             activeViewType = 'file-explorer';
             const dispatchEvent = vi.fn(
                 (_event: Partial<KeyboardEvent>) => true,
             );
+            // The mocked containment result changes between these two targets.
             pointerListener!({ target: new EventTarget() });
             targetInsideExplorer = false;
 
@@ -303,6 +321,20 @@ describe('GlobalKeyHandler', () => {
             pointerListener!({ target: new EventTarget() });
             pressKey('j', { target: { dispatchEvent } });
             expect(dispatchEvent).toHaveBeenCalledOnce();
+        });
+
+        it('stops explorer navigation when focus moves outside the tree', () => {
+            activeViewType = 'file-explorer';
+            const dispatchEvent = vi.fn(
+                (_event: Partial<KeyboardEvent>) => true,
+            );
+            pointerListener!({ target: new EventTarget() });
+            targetInsideExplorer = false;
+
+            focusListener!({ target: new EventTarget() });
+            pressKey('j', { target: { dispatchEvent } });
+
+            expect(dispatchEvent).not.toHaveBeenCalled();
         });
     });
 

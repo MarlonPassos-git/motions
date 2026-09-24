@@ -13,6 +13,7 @@ import { observeKeyEvent } from './key-observer';
 
 import { runCleanups } from '../util/cleanup';
 const SEQUENCE_TIMEOUT = 1000;
+const MAX_FILE_EXPLORER_MOVEMENTS = 100;
 const FILE_EXPLORER_ARROW_KEYS = new Map([
     ['h', 'ArrowLeft'],
     ['j', 'ArrowDown'],
@@ -302,7 +303,9 @@ export class GlobalKeyHandler {
         e.preventDefault();
         e.stopImmediatePropagation();
 
-        const repeat = this.countActive ? this.count : 1;
+        const repeat = this.countActive
+            ? Math.min(this.count, MAX_FILE_EXPLORER_MOVEMENTS)
+            : 1;
         for (let i = 0; i < repeat; i++) {
             const arrowEvent = new KeyboardEventCtor('keydown', {
                 key: arrowKey,
