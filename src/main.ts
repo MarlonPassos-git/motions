@@ -34,7 +34,11 @@ import { registerDial } from './actions/register-dial';
 import { registerTextObjects } from './text-objects/register';
 import { createAsymmetricPairTextObject } from './text-objects/pair-util';
 import { VimModeTracker } from './vim/mode-tracker';
-import { ScrolloffManager, createScrolloffExtension } from './vim/scrolloff';
+import {
+    ScrolloffManager,
+    createScrolloffExtension,
+    getScrolloffLines,
+} from './vim/scrolloff';
 import {
     loadVimrc,
     applyVimrcMaps,
@@ -2138,6 +2142,7 @@ export default class VimMotionsPlugin extends Plugin {
                 () =>
                     getVaultConfig(this.app, 'propertiesInDocument') ===
                     'source',
+                getScrolloffLines,
             ),
         );
 

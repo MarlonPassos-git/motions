@@ -7,6 +7,7 @@ import {
     sendVimEscape,
     ensureLivePreview,
     ensureSourceMode,
+    setPluginSettingAndReload,
     PAUSE,
 } from '../../helpers';
 
@@ -353,6 +354,107 @@ describe('Normal mode — z-prefix commands (Tier 1)', function () {
             );
         });
 
+        /**
+         * Measured against Neovim 0.12.5 (`nvim --clean`, 80x23 window, wrap
+         * on, scrolloff 0, smoothscroll off) on one 11-display-row line:
+         *
+         *   cursor at line start  -> topline 35, skipcol 0, winline  7
+         *   cursor at line middle -> topline 35, skipcol 0, winline 12
+         *   cursor at line end    -> topline 35, skipcol 0, winline 17
+         *
+         * The viewport is identical in all three; only the cursor's row inside
+         * it moves. `zz` positions the window from the buffer line alone and
+         * never from the cursor's display row (Vim's `scroll_cursor_halfway`
+         * works in whole-line heights). The #183 follow-up comment reports
+         * this as a regression — it is not, and must not be "fixed" away.
+         */
+        it('zz scroll position must not depend on the cursor column within a wrapped line (#183)', async function () {
+            const long = lineOfRows(Math.max(6, Math.floor(viewportRows / 3)));
+            const columns = [0, Math.floor(long.length / 2), long.length - 1];
+            const samples: {
+                scrollTop: number;
+                cursorRowInLine: number;
+                blockRows: number;
+            }[] = [];
+
+            for (const ch of columns) {
+                await setupEditor(docWith(long), {
+                    line: LONG_LINE_INDEX,
+                    ch,
+                });
+                await browser.pause(PAUSE.EDITOR_SETTLE);
+                await vimKeys('z', 'z');
+                await browser.pause(200);
+
+                const geo = await getWrapGeometry();
+                expect(geo).not.toBeNull();
+                if (!geo) return;
+                samples.push({
+                    scrollTop: await getScrollTop(),
+                    // Measured from the line's own first row, so this stays
+                    // true whatever the scroll position under test turns out
+                    // to be.
+                    cursorRowInLine: Math.round(
+                        (geo.cursorBottom - geo.blockTop) / geo.lineHeight,
+                    ),
+                    blockRows: Math.round(
+                        (geo.blockBottom - geo.blockTop) / geo.lineHeight,
+                    ),
+                });
+            }
+
+            const [atStart, atMiddle, atEnd] = samples;
+            if (!atStart || !atMiddle || !atEnd) {
+                throw new Error(`expected 3 samples, got ${samples.length}`);
+            }
+
+            // Preconditions: the line really wraps, really fits the viewport,
+            // and the three columns really land on different display rows —
+            // otherwise the equality below would hold vacuously.
+            expect(atStart.blockRows).toBeGreaterThanOrEqual(6);
+            expect(atStart.blockRows).toBeLessThan(Math.floor(viewportRows));
+            expect(atEnd.cursorRowInLine - atStart.cursorRowInLine).toBe(
+                atStart.blockRows - 1,
+            );
+            expect(atStart.scrollTop).toBeGreaterThan(0);
+
+            expect(atMiddle.scrollTop).toBe(atStart.scrollTop);
+            expect(atEnd.scrollTop).toBe(atStart.scrollTop);
+        });
+
+        /**
+         * Neovim 0.12.5, same window, cursor on the final character of a line
+         * taller than the window:
+         *
+         *   24 display rows -> skipcol   80 ( 1 row into the line), winline 23
+         *   30 display rows -> skipcol  560 ( 7 rows into the line), winline 23
+         *   60 display rows -> skipcol 2960 (37 rows into the line), winline 23
+         *
+         * winline 23 of a 23-row window is the *last* row: Vim scrolls inside
+         * the line by exactly enough to keep the cursor on screen, which puts
+         * the cursor at the bottom. That is the placement the #183 follow-up
+         * comment reports as wrong; it is what Vim does.
+         */
+        it('zz puts the cursor on the last visible row when the line is taller than the viewport (#183)', async function () {
+            await placeCursorAtEndOfLongLine(
+                lineOfRows(Math.floor(viewportRows) * 2),
+            );
+
+            await vimKeys('z', 'z');
+            await browser.pause(200);
+
+            const geo = await getWrapGeometry();
+            expect(geo).not.toBeNull();
+            expect(geo!.blockBottom - geo!.blockTop).toBeGreaterThan(
+                geo!.viewportHeight,
+            );
+
+            const rowsBelowCursor = Math.round(
+                (geo!.viewportHeight - geo!.cursorBottom) / geo!.lineHeight,
+            );
+            expect(rowsBelowCursor).toBe(0);
+        });
+
         it('zz should still centre a short unwrapped line', async function () {
             await setupEditor(docWith('short line'), {
                 line: LONG_LINE_INDEX,
@@ -373,6 +475,231 @@ describe('Normal mode — z-prefix commands (Tier 1)', function () {
             expect(
                 Math.abs(blockCentre - geo!.viewportHeight / 2),
             ).toBeLessThanOrEqual(geo!.lineHeight);
+        });
+
+        /**
+         * `scrolloff` reaches `zz` in exactly one situation: the cursor is in
+         * the interior of a line taller than the window, where Vim raises
+         * `skipcol` to hold the margin. Measured in Neovim 0.12.5 (80x23) with
+         * the cursor on the middle character of a 46-display-row line:
+         *
+         *   so=0    -> skipcol   0, winline 23 (0 rows below the cursor)
+         *   so=5    -> skipcol 400, winline 18 (5 rows below)
+         *   so=9999 -> skipcol 880, winline 12 (centred; Vim centres outright
+         *              once `w_height_inner <= so * 2`)
+         *
+         * A line that *fits* the window is never touched — all three values
+         * give winline 7/12/17 for a 11-row line — because `zz` only sets a
+         * whole-line `topline`, and `skipcol` stays 0. Nor is the margin
+         * reachable at the line's first or last row: `skipcol` saturates at
+         * 0 and at `lineRows - winheight`, which is why cursor-at-line-end
+         * stays on the bottom row at every `scrolloff`.
+         */
+        describe('scrolloff inside a line taller than the viewport', function () {
+            let originalScrolloff = 5;
+
+            async function placeMidLongLine(rows: number): Promise<void> {
+                const long = lineOfRows(rows);
+                await setupEditor(docWith(long), {
+                    line: LONG_LINE_INDEX,
+                    ch: Math.floor(long.length / 2),
+                });
+                await browser.pause(PAUSE.EDITOR_SETTLE);
+            }
+
+            before(async function () {
+                originalScrolloff = (await browser.executeObsidian(
+                    ({ app }) => {
+                        const plugin = (
+                            app as unknown as {
+                                plugins: {
+                                    plugins: Record<
+                                        string,
+                                        { settings: { scrolloffLines: number } }
+                                    >;
+                                };
+                            }
+                        ).plugins.plugins['vim-motions'];
+                        return plugin?.settings.scrolloffLines ?? 5;
+                    },
+                )) as number;
+            });
+
+            after(async function () {
+                await setPluginSettingAndReload(
+                    'scrolloffLines',
+                    originalScrolloff,
+                );
+            });
+
+            it('zz keeps scrolloff rows below the cursor inside a tall wrapped line', async function () {
+                await setPluginSettingAndReload('scrolloffLines', 5);
+                await placeMidLongLine(Math.floor(viewportRows) * 2);
+
+                await vimKeys('z', 'z');
+                await browser.pause(200);
+
+                const geo = await getWrapGeometry();
+                expect(geo).not.toBeNull();
+                expect(geo!.blockBottom - geo!.blockTop).toBeGreaterThan(
+                    geo!.viewportHeight,
+                );
+
+                const rowsBelowCursor =
+                    (geo!.viewportHeight - geo!.cursorBottom) / geo!.lineHeight;
+                expect(Math.round(rowsBelowCursor)).toBe(5);
+            });
+
+            it('zz centres the cursor row inside a tall wrapped line when scrolloff exceeds the viewport', async function () {
+                await setPluginSettingAndReload('scrolloffLines', 9999);
+                await placeMidLongLine(Math.floor(viewportRows) * 2);
+
+                await vimKeys('z', 'z');
+                await browser.pause(200);
+
+                const geo = await getWrapGeometry();
+                expect(geo).not.toBeNull();
+                expect(geo!.blockBottom - geo!.blockTop).toBeGreaterThan(
+                    geo!.viewportHeight,
+                );
+
+                const rowsAboveCursor = geo!.cursorTop / geo!.lineHeight;
+                const rowsBelowCursor =
+                    (geo!.viewportHeight - geo!.cursorBottom) / geo!.lineHeight;
+                // Centred, not merely "off the bottom edge": both halves must
+                // match, and both must be far from the 0 the bug produced.
+                expect(rowsBelowCursor).toBeGreaterThan(20);
+                expect(
+                    Math.abs(rowsAboveCursor - rowsBelowCursor),
+                ).toBeLessThanOrEqual(1);
+            });
+
+            it('scrolloff does not move zz on a line that fits the viewport', async function () {
+                const rows = Math.max(6, Math.floor(viewportRows / 3));
+
+                // `zz` is pressed twice on purpose. A single press measured
+                // from a far-away scroll lands up to ~2 display rows off,
+                // because CM6 estimates `coordsAtPos` for content outside the
+                // rendered viewport; the second press starts from the first
+                // one's output and converges. That artifact predates this
+                // suite and is not what this test is about, so it is removed
+                // rather than tolerated with a fuzzy comparison.
+                async function settledLineTop(so: number): Promise<number> {
+                    await setPluginSettingAndReload('scrolloffLines', so);
+                    await placeMidLongLine(rows);
+                    await vimKeys('z', 'z');
+                    await browser.pause(200);
+                    await vimKeys('z', 'z');
+                    await browser.pause(200);
+                    const geo = await getWrapGeometry();
+                    expect(geo).not.toBeNull();
+                    expect(geo!.blockBottom - geo!.blockTop).toBeLessThan(
+                        geo!.viewportHeight,
+                    );
+                    return geo!.blockTop;
+                }
+
+                const withoutScrolloff = await settledLineTop(0);
+                const withScrolloff = await settledLineTop(9999);
+
+                expect(withoutScrolloff).toBeGreaterThan(0);
+                expect(withScrolloff).toBe(withoutScrolloff);
+            });
+        });
+    });
+
+    /**
+     * `zt` and `zb` hold a `scrolloff` margin past the cursor line on *any*
+     * line, not only one taller than the window. Measured in Neovim 0.12.5
+     * (80x23) on an ordinary one-row line, cursor line 61:
+     *
+     *   zt so=5    -> topline 56 (5 rows above the line),  winline  6
+     *   zb so=5    -> topline 44 (5 rows below the line),  winline 18
+     *   zt so=11   -> topline 50, winline 12  ]  identical to zz: once the
+     *   zb so=11   -> topline 50, winline 12  ]  margin no longer fits, all
+     *   zz so=11   -> topline 50, winline 12  ]  three centre the line
+     *
+     * so=12 and so=9999 reproduce the so=11 row exactly, so the margin
+     * saturates at the centred position rather than overshooting it.
+     */
+    describe('zt / zb with scrolloff', function () {
+        const DOC = Array.from({ length: 240 }, (_, i) => `line ${i + 1}`).join(
+            '\n',
+        );
+        const TARGET = 120;
+        let originalScrolloff = 5;
+
+        // Two presses for the same reason as the zz case above: the first
+        // measurement from a distant scroll is subject to CM6's estimated
+        // coordinates for unrendered content.
+        async function settledGeometry(
+            so: number,
+            key: string,
+        ): Promise<WrapGeometry> {
+            await setPluginSettingAndReload('scrolloffLines', so);
+            await setupEditor(DOC, { line: TARGET, ch: 0 });
+            await browser.pause(PAUSE.EDITOR_SETTLE);
+            await vimKeys('z', key);
+            await browser.pause(200);
+            await vimKeys('z', key);
+            await browser.pause(200);
+            const geo = await getWrapGeometry();
+            expect(geo).not.toBeNull();
+            return geo!;
+        }
+
+        before(async function () {
+            originalScrolloff = (await browser.executeObsidian(({ app }) => {
+                const plugin = (
+                    app as unknown as {
+                        plugins: {
+                            plugins: Record<
+                                string,
+                                { settings: { scrolloffLines: number } }
+                            >;
+                        };
+                    }
+                ).plugins.plugins['vim-motions'];
+                return plugin?.settings.scrolloffLines ?? 5;
+            })) as number;
+        });
+
+        after(async function () {
+            await setPluginSettingAndReload(
+                'scrolloffLines',
+                originalScrolloff,
+            );
+        });
+
+        it('zt leaves scrolloff rows above the cursor line', async function () {
+            const geo = await settledGeometry(5, 't');
+            expect(Math.round(geo.blockTop / geo.lineHeight)).toBe(5);
+        });
+
+        it('zb leaves scrolloff rows below the cursor line', async function () {
+            const geo = await settledGeometry(5, 'b');
+            expect(
+                Math.round(
+                    (geo.viewportHeight - geo.blockBottom) / geo.lineHeight,
+                ),
+            ).toBe(5);
+        });
+
+        it('zt, zb and zz agree once scrolloff exceeds half the viewport', async function () {
+            const top = await settledGeometry(9999, 't');
+            const bottom = await settledGeometry(9999, 'b');
+            const centre = await settledGeometry(9999, 'z');
+
+            // The shared value must be the centred one, not an edge both
+            // happened to saturate at.
+            expect(
+                Math.abs(
+                    centre.blockTop -
+                        (centre.viewportHeight - centre.blockBottom),
+                ),
+            ).toBeLessThanOrEqual(centre.lineHeight);
+            expect(top.blockTop).toBe(centre.blockTop);
+            expect(bottom.blockTop).toBe(centre.blockTop);
         });
     });
 

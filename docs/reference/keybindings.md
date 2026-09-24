@@ -411,6 +411,34 @@ Navigate Obsidian panes, tabs, and history following Neovim conventions.
 | `[z`         | Move to start of current fold               |
 | `]z`         | Move to end of current fold                 |
 
+## Vertical scroll
+
+| Keybinding | Description                                          |
+| ---------- | ---------------------------------------------------- |
+| `zz`       | Centre the cursor line in the viewport               |
+| `z.`       | Centre the cursor line, cursor to first non-blank    |
+| `zt`       | Scroll the cursor line to the top of the viewport    |
+| `z<CR>`    | Cursor line to the top, cursor to first non-blank    |
+| `zb`       | Scroll the cursor line to the bottom of the viewport |
+| `z-`       | Cursor line to the bottom, cursor to first non-blank |
+
+> [!info]
+> On a wrapped line these commands position the **whole logical line**, not
+> the cursor's display row — Vim's `scroll_cursor_halfway` works in whole-line
+> heights, so `zz` with the cursor at the start, middle, or end of one wrapped
+> line produces the same scroll position. When the line is taller than the
+> viewport, Vim scrolls inside the line (`skipcol`) by just enough to keep the
+> cursor visible, which puts a cursor at the end of the line on the last
+> visible row. Both behaviours match Neovim.
+
+> [!tip]
+> `zt` and `zb` leave [`scrolloff`](settings.md) rows of margin above and below
+> the cursor line, and stop at the centred position once that margin no longer
+> fits — so with `set scrolloff=999`, `zt`, `zb` and `zz` all centre the line.
+> `zz` itself is unaffected by `scrolloff` on a line that fits the viewport.
+> Inside a line taller than the viewport the margin applies to the cursor's own
+> display row instead, and is unreachable at the line's first and last rows.
+
 ## Horizontal scroll
 
 | Keybinding | Description                                       |

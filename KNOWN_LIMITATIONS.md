@@ -489,6 +489,16 @@ The fork also implements a **backtracking deferral** for user-registered keymaps
 
 This means `<leader>t` mappings with longer partials (e.g., table nav `<leader>tL`) exhibit Neovim-correct `timeoutlen` behavior — the mapping fires after `operatorshadowtimeout` (default 1000ms) if no further key completes a longer match.
 
+## First `zz`/`zt`/`zb` press from a distant scroll position
+
+**Status**: Known deviation, up to two display rows.
+
+`zz`, `zt` and `zb` compute their target from `charCoords`, which resolves to CodeMirror's `coordsAtPos`. For a line CodeMirror has not rendered — or has rendered only partially, which is the case when the cursor line sits well outside the current viewport — those coordinates are estimated from the average line height rather than measured. The scroll target inherits the estimate.
+
+In practice the first press after a large jump can land up to about two display rows away from the Neovim-correct position, and a second press converges exactly, because it is computed from measured coordinates once the line is on screen. Measured on a 54-row viewport: `zz` on an 18-row wrapped line landed at `scrollTop` 2572 from a starting scroll of 3145, against the correct 2530 it reaches from a nearby starting position and on every subsequent press.
+
+`scrolloff` does not cause this and does not change it; the same offset appears at `scrolloff` 0. The e2e coverage in `test/specs/vim-builtin/z-commands.e2e.ts` presses twice where it needs the converged value, so the artifact cannot mask a real regression.
+
 ## ~~Insert-mode surround dot-repeat~~ (Fixed)
 
 **Status**: Fixed. `.` after `i<C-G>s{char}text<Esc>` now replays the full surround + typed text. This exceeds both vim-surround and nvim-surround, where insert-mode surround dot-repeat is broken ([nvim-surround #301](https://github.com/kylechui/nvim-surround/issues/301)). ([#82](https://github.com/saberzero1/motions/issues/82))
