@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - `CHANGELOG.md`
-- `AGENTS.md`, `CONTRIBUTING.md`: File Explorer key handling and E2E execution notes.
+- `AGENTS.md`, `CONTRIBUTING.md`: File Explorer key handling.
 - `README.md`, `docs/features/workspace-navigation.md`, `docs/reference/keybindings.md`: native File Explorer navigation, counts, focus gates, and editable-control exclusions.
 - `docs/features/workspace-navigation.md`: the fold placeholder sentence claimed the heading title was part of the label; replaced with the per-provider formats and why the heading case carries only a line count
 - `docs/reference/keybindings.md`: added the vertical scroll section (`zz`, `z.`, `zt`, `z<CR>`, `zb`, `z-`), which was undocumented, with the measured wrapped-line and `scrolloff` behaviour

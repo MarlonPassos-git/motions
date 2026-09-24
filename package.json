@@ -22,7 +22,7 @@
         "test:unit": "vitest run",
         "test:unit:watch": "vitest",
         "test:bench": "vitest bench",
-        "test:e2e": "npm run build:ci-test && node scripts/run-e2e-isolated.mjs",
+        "test:e2e": "npm run build:ci-test && wdio run ./wdio.conf.mts",
         "test": "npm run build && npm run test:e2e",
         "test:coverage": "tsx test/coverage-report.ts",
         "test:neovim-smoke": "tsx test/neovim/smoke.ts",
