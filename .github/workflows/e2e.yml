@@ -7,6 +7,10 @@ on:
         branches: ['main', 'master']
     workflow_dispatch:
 
+permissions:
+    contents: read
+    packages: read
+
 # Neovim writes stdpath('log') only for some levels and the child does not
 # resolve the runner's HOME the way a shell would, so a crash left nothing
 # readable. Obsidian inherits this and spawns the child, so it propagates.
@@ -60,7 +64,10 @@ jobs:
         name: e2e (shard ${{ matrix.shard.index }})
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/${{ github.repository }}/e2e-runner:latest
+            image: ghcr.io/marlonpassos-git/motions/e2e-runner:latest
+            credentials:
+                username: ${{ github.actor }}
+                password: ${{ secrets.GITHUB_TOKEN }}
             env:
                 DISPLAY: ':99'
             options: --shm-size=2g
@@ -119,7 +126,10 @@ jobs:
     e2e-latency:
         runs-on: ubuntu-latest
         container:
-            image: ghcr.io/${{ github.repository }}/e2e-runner:latest
+            image: ghcr.io/marlonpassos-git/motions/e2e-runner:latest
+            credentials:
+                username: ${{ github.actor }}
+                password: ${{ secrets.GITHUB_TOKEN }}
             env:
                 DISPLAY: ':99'
             options: --shm-size=2g
