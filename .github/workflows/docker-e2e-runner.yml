@@ -2,8 +2,9 @@ name: Build E2E Runner Image
 
 on:
     push:
-        branches: ['main', 'master']
+        branches: ['main', 'master', 'ci/pr191-validation']
         paths:
+            - '.github/workflows/docker-e2e-runner.yml'
             - '.github/docker/e2e-runner/**'
             - '.dockerignore'
             - 'scripts/install-neovim.sh'
