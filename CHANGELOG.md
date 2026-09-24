@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Local E2E display isolation on Wayland** — `npm run test:e2e` starts Obsidian on a separate Xvfb display, selected with `-displayfd`, and removes inherited Wayland socket access. Windows, macOS, and X11 keep their existing displays. The Nix dev shell now supplies Xvfb. ([#191](https://github.com/saberzero1/motions/pull/191))
+    - Plugin: `scripts/run-e2e-isolated.mjs`, `package.json`, `flake.nix`
+
 ### Fixed
 
+- **Fork dependency installs over HTTPS** — the codemirror-vim Git dependency and lockfile now resolve over HTTPS, so `npm ci` does not require GitHub SSH credentials.
+    - Plugin: `package.json`, `package-lock.json`
 - **`zz`, `zt` and `zb` now honour `scrolloff`** — they reached the scroll position through `scrollDOM.scrollTop` without dispatching a CodeMirror transaction, and the plugin's margin enforcer is an `updateListener` gated on `update.selectionSet`, so it never saw them; `scrollToCursor` had no `scrolloff` term of its own either. The margin was therefore ignored on every one of these commands, at the default `scrolloffLines` of 5 as much as at a configured value. Measured against Neovim 0.12.5 (`nvim --clean`, 80x23, `wrap`, `nosmoothscroll`), it reaches them in two distinct ways. `zt` and `zb` hold the margin past the cursor line on **any** line — Neovim moves `topline` from 61 to 56 for `zt` at `so=5`, where the plugin left 0 rows — and both stop at the centred position once the margin no longer fits, which is why `zt`, `zb` and `zz` all report `topline` 50 at `so=11` and never move again at `so=12` or `so=9999`. Inside a line taller than the window, where Neovim scrolls by `skipcol` rather than by `topline`, the margin instead applies to the cursor's own display row: `so=5` gives `skipcol` 400 and `winline` 18 against the plugin's 23, and `so=9999` gives `skipcol` 880 and a centred `winline` 12. `zz` is untouched on a line that fits, because `zz` only ever sets a whole-line `topline`; and the margin stays out of reach at a tall line's first and last display row, where `skipcol` saturates at 0 and at `lineRows - winheight` — which is why a cursor at the end of a very long wrapped line sits on the bottom row at every `scrolloff`, exactly as reported in [#183](https://github.com/saberzero1/motions/issues/183). Built-in vim mode is unaffected; it uses Obsidian's bundled codemirror-vim. ([#183](https://github.com/saberzero1/motions/issues/183))
     - Fork: `src/vim.js` (`scrollToCursor`, new `Vim.setScrolloffSource`)
     - Plugin: `src/vim/scrolloff.ts` (new `getScrolloffLines`), `src/vim/bundled-vim.ts`
@@ -25,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - `CHANGELOG.md`
+- `AGENTS.md`, `CONTRIBUTING.md`: local Wayland E2E setup and platform behavior.
 - `docs/features/workspace-navigation.md`: the fold placeholder sentence claimed the heading title was part of the label; replaced with the per-provider formats and why the heading case carries only a line count
 - `docs/reference/keybindings.md`: added the vertical scroll section (`zz`, `z.`, `zt`, `z<CR>`, `zb`, `z-`), which was undocumented, with the measured wrapped-line and `scrolloff` behaviour
 - `KNOWN_LIMITATIONS.md`: recorded that the first `zz`/`zt`/`zb` press from a distant scroll can land up to two display rows off, because CodeMirror estimates coordinates for content it has not rendered

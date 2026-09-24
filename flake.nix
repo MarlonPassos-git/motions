@@ -53,6 +53,7 @@
               libnotify
               libappindicator-gtk3
               libdbusmenu
+              xvfb
             ]
           else
             [ ]

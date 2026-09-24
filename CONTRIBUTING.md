@@ -113,11 +113,11 @@ nix develop
 npm run test:e2e
 
 # On other Linux systems
-# Install the required system libraries for Electron (see flake.nix for the list)
+# Install the required system libraries for Electron and Xvfb
 npm run test:e2e
 ```
 
-The tests run in a headless Obsidian instance with Xvfb. The test vault is in `test-vault/`.
+On local Wayland desktops, `npm run test:e2e` starts a separate Xvfb display and removes inherited Wayland socket variables before launching Obsidian. The Nix dev shell includes Xvfb; on other Linux systems, install Xvfb or set `MOTIONS_XVFB_BIN` to its executable path. macOS, Windows, and X11 keep their native test sessions. The test vault is in `test-vault/`.
 
 **CI infrastructure**: In CI, the e2e workflow shards spec files into 36 groups (matching the GitHub Actions concurrent job limit) and runs each shard inside a custom Docker image (`ghcr.io/<repo>/e2e-runner:latest`) that includes Xvfb, herbstluftwm, Node.js 24, and Electron system dependencies. The discover job distributes specs round-robin; each runner executes 2–3 specs sequentially. This keeps the matrix under the 256-job GitHub Actions cap. The entrypoint starts the virtual display with readiness polling — no manual `apt-get install` or `sleep`-based setup needed per runner. The image is defined in `.github/docker/e2e-runner/Dockerfile` and built by `.github/workflows/docker-e2e-runner.yml` on Dockerfile changes or manual dispatch. The same sharded spec distribution also runs on `macos-latest` (ARM) and `windows-latest` runners via the `e2e-cross-platform` job — no virtual display setup is needed on those platforms since GitHub macOS/Windows runners provide native GUI sessions. `wdio-obsidian-service` handles Obsidian download, ChromeDriver version matching, and platform-specific launch. Windows shards retry up to 3 times on `EPERM` errors (Windows NTFS file locking during `obsidian-launcher`'s atomic rename).
 

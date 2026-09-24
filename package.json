@@ -22,7 +22,7 @@
         "test:unit": "vitest run",
         "test:unit:watch": "vitest",
         "test:bench": "vitest bench",
-        "test:e2e": "npm run build:ci-test && wdio run ./wdio.conf.mts",
+        "test:e2e": "npm run build:ci-test && node scripts/run-e2e-isolated.mjs",
         "test": "npm run build && npm run test:e2e",
         "test:coverage": "tsx test/coverage-report.ts",
         "test:neovim-smoke": "tsx test/neovim/smoke.ts",
@@ -70,7 +70,7 @@
     "dependencies": {
         "@codemirror/autocomplete": "https://github.com/saberzero1/autocomplete.git",
         "@leeoniya/ufuzzy": "^1.0.19",
-        "@replit/codemirror-vim": "github:saberzero1/codemirror-vim",
+        "@replit/codemirror-vim": "https://github.com/saberzero1/codemirror-vim.git",
         "fflate": "^0.8.3",
         "web-tree-sitter": "^0.27.0"
     },
