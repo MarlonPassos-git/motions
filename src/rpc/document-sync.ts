@@ -21,13 +21,22 @@ import type { MsgpackRpcClient } from './msgpack-rpc';
 export interface NeovimEditorOptions {
     textwidth: number;
     listContinuation: boolean;
+    indent: { useTab: boolean; tabSize: number };
     yankHighlight: { mode: 'off' | 'solid' | 'fade'; duration: number };
 }
 
 // Numbered lists are out of reach here: `comments` cannot increment a counter.
 const APPLY_EDITOR_OPTIONS_LUA = `
-local buf, textwidth, listContinuation, yankHighlight = ...
+local buf, textwidth, listContinuation, yankHighlight, useTab, tabSize = ...
 vim.api.nvim_set_option_value('textwidth', textwidth, { buf = buf })
+-- Vim rebuilds a continued or reindented line's indent from its column count
+-- rather than copying the original bytes, so these decide the style Obsidian
+-- gets back. The Markdown ftplugin sets expandtab, which silently converts a
+-- tab-indented vault to spaces on every o/O.
+vim.api.nvim_set_option_value('expandtab', not useTab, { buf = buf })
+vim.api.nvim_set_option_value('tabstop', tabSize, { buf = buf })
+vim.api.nvim_set_option_value('shiftwidth', tabSize, { buf = buf })
+vim.api.nvim_set_option_value('softtabstop', tabSize, { buf = buf })
 -- Derive from the ftplugin's values, captured once, so that turning the
 -- setting off restores them and turning it on repeatedly cannot accumulate.
 if vim.b[buf].vim_motions_stock_comments == nil then
@@ -248,11 +257,18 @@ export class NeovimDocumentSync {
     private async applyEditorOptions(): Promise<void> {
         const buffer = this.buffer;
         if (buffer === null || this.disposed) return;
-        const { textwidth, listContinuation, yankHighlight } =
+        const { textwidth, listContinuation, indent, yankHighlight } =
             this.editorOptions;
         await this.rpc.request('nvim_exec_lua', [
             APPLY_EDITOR_OPTIONS_LUA,
-            [buffer, textwidth, listContinuation, yankHighlight.mode !== 'off'],
+            [
+                buffer,
+                textwidth,
+                listContinuation,
+                yankHighlight.mode !== 'off',
+                indent.useTab,
+                indent.tabSize,
+            ],
         ]);
     }
 

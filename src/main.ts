@@ -4110,10 +4110,31 @@ export default class VimMotionsPlugin extends Plugin {
         return {
             textwidth: this.settings.textwidth,
             listContinuation: this.settings.listContinuationOnOpen,
+            indent: this.vaultIndentStyle(),
             yankHighlight: {
                 mode: this.settings.yankHighlightMode,
                 duration: this.settings.yankHighlightDuration,
             },
+        };
+    }
+
+    private vaultIndentStyle(): { useTab: boolean; tabSize: number } {
+        let useTab: unknown;
+        let tabSize: unknown;
+        try {
+            useTab = getVaultConfig(this.app, 'useTab');
+            tabSize = getVaultConfig(this.app, 'tabSize');
+        } catch {
+            return { useTab: true, tabSize: 4 };
+        }
+        return {
+            useTab: typeof useTab === 'boolean' ? useTab : true,
+            tabSize:
+                typeof tabSize === 'number' &&
+                Number.isInteger(tabSize) &&
+                tabSize > 0
+                    ? tabSize
+                    : 4,
         };
     }
 

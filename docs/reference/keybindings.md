@@ -675,26 +675,26 @@ Oil keybindings are only active when an oil buffer is focused. All keybindings a
 
 Enhanced Vim behavior and Obsidian-specific improvements.
 
-| Keybinding | Description                                            |
-| ---------- | ------------------------------------------------------ |
-| `o` / `O`  | Smart list continuation (bullets, numbers, checkboxes) |
-| `Y`        | Yank to end of line (`y$`)                             |
-| `Q`        | Replay last recorded macro (`@@`)                      |
-| `@:`       | Repeat last ex command                                 |
-| `&`        | Repeat last `:s` substitution on current line          |
-| `g&`       | Repeat last `:s` substitution on all lines             |
-| `gM`       | Go to middle character of text line                    |
-| `K`        | Keyword lookup (hover preview on links, char info)     |
-| `]<Space>` | Add N blank lines below cursor                         |
-| `[<Space>` | Add N blank lines above cursor                         |
-| `ZZ`       | Write current file and close tab (`:wq`)               |
-| `ZQ`       | Close tab without saving (`:q`)                        |
-| `g;`       | Older change                                           |
-| `g,`       | Newer change                                           |
-| `g-`       | Older undo state                                       |
-| `g+`       | Newer undo state                                       |
-| `<C-p>`    | Cycle paste previous register (or `k` if not cycling)  |
-| `<C-n>`    | Cycle paste next register (or `j` if not cycling)      |
+| Keybinding | Description                                                         |
+| ---------- | ------------------------------------------------------------------- |
+| `o` / `O`  | Smart list continuation (bullets, numbers, checkboxes, blockquotes) |
+| `Y`        | Yank to end of line (`y$`)                                          |
+| `Q`        | Replay last recorded macro (`@@`)                                   |
+| `@:`       | Repeat last ex command                                              |
+| `&`        | Repeat last `:s` substitution on current line                       |
+| `g&`       | Repeat last `:s` substitution on all lines                          |
+| `gM`       | Go to middle character of text line                                 |
+| `K`        | Keyword lookup (hover preview on links, char info)                  |
+| `]<Space>` | Add N blank lines below cursor                                      |
+| `[<Space>` | Add N blank lines above cursor                                      |
+| `ZZ`       | Write current file and close tab (`:wq`)                            |
+| `ZQ`       | Close tab without saving (`:q`)                                     |
+| `g;`       | Older change                                                        |
+| `g,`       | Newer change                                                        |
+| `g-`       | Older undo state                                                    |
+| `g+`       | Newer undo state                                                    |
+| `<C-p>`    | Cycle paste previous register (or `k` if not cycling)               |
+| `<C-n>`    | Cycle paste next register (or `j` if not cycling)                   |
 
 ## Insert mode
 

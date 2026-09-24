@@ -140,7 +140,7 @@ src/
     cmdline.ts             # Level-keyed external command-line, prompt, caret, and special-character overlay
     config-export.ts       # Generated Neovim configuration, sentinel-guarded writes, plugin install/update, and module probing
     decorations.ts         # UI redraw clock, CM6 decoration/fold dispatch, and float notification consumer
-    document-sync.ts       # Named acwrite mirror, Obsidian save/read routing, line events, and byte/UTF-16 mapping
+    document-sync.ts       # Named acwrite mirror, Obsidian save/read routing, line events, byte/UTF-16 mapping, and projected editor options (textwidth, list continuation, indent style, yank highlight)
     floating-windows.ts    # CM6-metric float positioning, content/extmark overlays, stacking, and cleanup
     frontmatter-fold.ts    # Window-local Markdown foldexpr for headings, callouts, and frontmatter
     ime-input.ts           # Cursor-positioned native composition owner, nvim_input commit, and cancellation lifecycle

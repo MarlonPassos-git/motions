@@ -52,13 +52,13 @@ Most behaviour that lives in the bundled Vim engine is not carried across, becau
 
 **Carried across from your settings**, where Neovim can provide the behaviour natively and the setting is projected onto the mirrored buffer:
 
-| Setting                 | In RPC mode                                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Smart list continuation | `o`/`O` continues `-`, `*`, and `+` bullets. Numbered lists are not continued, because Vim's `comments` cannot increment a counter.   |
-| Yank highlight          | Both `solid` and `fade` render at the configured duration. Blockwise yanks are skipped, matching the bundled engine.                  |
-| Hard-wrap width         | `textwidth` drives native `gq`/`gw`.                                                                                                  |
-| Cursor shapes           | The per-mode shape follows Neovim's mode, including operator-pending and the three visual modes.                                      |
-| Input-method switching  | Automatic per-mode switching fires on Neovim's mode, so CJK input methods follow insert and normal as they do in bundled-engine mode. |
+| Setting                 | In RPC mode                                                                                                                                                                                                                                                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Smart list continuation | `o`/`O` continues `-`, `*`, and `+` bullets, and `> ` blockquotes. Numbered lists, checkboxes, and list markers inside a blockquote are not continued, because Vim's `comments` cannot increment a counter or express them. Indentation style follows your **Settings → Editor → Indent using tabs** and **Tab indent size**. |
+| Yank highlight          | Both `solid` and `fade` render at the configured duration. Blockwise yanks are skipped, matching the bundled engine.                                                                                                                                                                                                          |
+| Hard-wrap width         | `textwidth` drives native `gq`/`gw`.                                                                                                                                                                                                                                                                                          |
+| Cursor shapes           | The per-mode shape follows Neovim's mode, including operator-pending and the three visual modes.                                                                                                                                                                                                                              |
+| Input-method switching  | Automatic per-mode switching fires on Neovim's mode, so CJK input methods follow insert and normal as they do in bundled-engine mode.                                                                                                                                                                                         |
 
 **Neovim's own behaviour applies instead:**
 
