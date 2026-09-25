@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-25
+
 ### Added
 
 - **Smart list continuation now continues blockquotes and callouts** — `o`/`O` on `> quote`, a `> [!NOTE]` title or body line, a nested `> > quote`, an indented `  > quote`, or a spaceless `>quote` previously produced a bare empty line, because the marker group in `LIST_CONTINUATION_RE` was mandatory and a quote with no list marker never matched. Measured against Obsidian's own Enter key over 31 line shapes, `o` disagreed with Enter on seven of them, all of them quote-only lines; the plugin's own Neovim backend already continued every one of those, since the stock Markdown ftplugin carries `n:>` in `comments` and the RPC projection preserves it. The marker group is now optional, and a match with no marker carries the indent and quote chain alone. The same change adds a padding group between the quote and the marker, so a list indented inside a quote (`>   - indented`) keeps both rather than matching nothing — without it, making the marker optional would have continued that line as `> ` and silently dropped the bullet. Behaviour with a marker present is unchanged, and the fenced-code-block exclusion still applies to quote-only lines, including fences written inside a blockquote. ([#195](https://github.com/saberzero1/motions/issues/195))
