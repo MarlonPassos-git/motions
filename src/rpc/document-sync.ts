@@ -112,6 +112,22 @@ end
 // Reseeding at undolevels = -1 discards the history instead. Reading the option
 // yields -123456 ("use the global value") when no buffer-local value is set, so
 // saving and restoring it does not pin a local value.
+// One buffer mirrors every note, renamed in place, which breaks two things a
+// language server depends on. It is still attached to the previous note's URI,
+// so without an explicit detach it goes on attributing edits to that note; and
+// `vim.lsp.enable()` attaches on FileType but skips a buffer whose 'buftype' is
+// already set, so after the first activation left it `acwrite` no later
+// activation could ever attach one. Detaching here closes the old document, and
+// clearing 'buftype' makes each activation look like the first to Neovim's own
+// attach rule; the caller restores `acwrite` once the content is in place.
+const PREPARE_ACTIVATION_LUA = `
+local buf = ...
+for _, client in ipairs(vim.lsp.get_clients({ bufnr = buf })) do
+    pcall(vim.lsp.buf_detach_client, buf, client.id)
+end
+vim.bo[buf].buftype = ''
+`;
+
 const RESEED_BUFFER_LUA = `
 local buf, lines = ...
 local undolevels = vim.bo[buf].undolevels
@@ -493,6 +509,10 @@ export class NeovimDocumentSync {
         this.mirror = lines;
         this.remirroring = true;
         try {
+            await this.rpc.request('nvim_exec_lua', [
+                PREPARE_ACTIVATION_LUA,
+                [buffer],
+            ]);
             await this.rpc.request('nvim_buf_set_name', [buffer, name]);
             await this.rpc.request('nvim_set_current_buf', [buffer]);
             await this.rpc.request('nvim_command', ['filetype detect']);

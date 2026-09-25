@@ -14,6 +14,8 @@ vim.g.vim_motions_test_config = true
 vim.opt.swapfile = false
 vim.opt.runtimepath:append(vim.fs.joinpath(vim.fn.getcwd(), 'test-vault'))
 
+_G.vim_motions_lsp_events = {}
+
 vim.g.vim_motions_lsp_hover_body = 'VIM_MOTIONS_HOVER_BODY'
 vim.g.vim_motions_lsp_diagnostic = 'VIM_MOTIONS_LSP_DIAGNOSTIC'
 vim.g.vim_motions_lsp_items = { 'probeAlphaItem', 'probeBetaItem' }
@@ -59,6 +61,19 @@ local function make_server(dispatchers)
             return true, 1
         end,
         notify = function(method, params)
+            -- Document lifecycle is recorded so a spec can prove the server's
+            -- URI follows the note. The mirror buffer is renamed rather than
+            -- reopened, so without an explicit didClose/didOpen the server goes
+            -- on attributing edits to the previously active note.
+            if
+                method == 'textDocument/didOpen'
+                or method == 'textDocument/didClose'
+            then
+                table.insert(
+                    _G.vim_motions_lsp_events,
+                    method .. ' ' .. tostring(params.textDocument.uri)
+                )
+            end
             if method == 'textDocument/didOpen' then
                 local uri = params.textDocument.uri
                 vim.schedule(function()

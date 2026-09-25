@@ -1,6 +1,6 @@
 import { browser, expect } from '@wdio/globals';
 import { resolve } from 'node:path';
-import { getNotices, loadSingleFileWorkspace, setupEditor } from '../helpers';
+import { getNotices, loadTwoFileWorkspace, setupEditor } from '../helpers';
 import { requireRpcPrerequisites } from './rpc-prerequisites';
 
 /**
@@ -61,6 +61,8 @@ interface LateEnableOutcome {
 
 const TEST_CONFIG_PATH = resolve('test/fixtures/nvim/lsp-probe.lua');
 const FIXTURE = ['alpha beta gamma', 'delta epsilon', 'pro'].join('\n');
+const FIRST_FILE = 'Welcome.md';
+const SECOND_FILE = 'Target.md';
 
 const HOVER_BODY = 'VIM_MOTIONS_HOVER_BODY';
 const DIAGNOSTIC_MESSAGE = 'VIM_MOTIONS_LSP_DIAGNOSTIC';
@@ -245,6 +247,38 @@ async function renderedFloatLines(): Promise<string[]> {
     );
 }
 
+async function activateFile(path: string): Promise<void> {
+    await browser.executeObsidian(async ({ app, obsidian }, target: string) => {
+        let found: import('obsidian').WorkspaceLeaf | null = null;
+        app.workspace.iterateAllLeaves((leaf) => {
+            const view = leaf.view;
+            if (
+                view instanceof obsidian.MarkdownView &&
+                view.file?.path === target
+            )
+                found = leaf;
+        });
+        if (!found) throw new Error(`No open leaf for ${target}`);
+        app.workspace.setActiveLeaf(found, { focus: true });
+        await Promise.resolve();
+    }, path);
+    await browser.waitUntil(
+        async () =>
+            String(await pluginRequest('nvim_buf_get_name', [0])).endsWith(
+                path,
+            ),
+        {
+            timeout: 10000,
+            interval: 50,
+            timeoutMsg: `the mirror buffer to be renamed to ${path}`,
+        },
+    );
+}
+
+async function lspEvents(): Promise<string[]> {
+    return (await execLua('return _G.vim_motions_lsp_events')) as string[];
+}
+
 async function attachedClients(): Promise<string[]> {
     return (await execLua(
         `local names = {}
@@ -282,7 +316,7 @@ describe('Neovim RPC native LSP capability', function () {
 
     before(async function () {
         requireRpcPrerequisites(this);
-        await loadSingleFileWorkspace();
+        await loadTwoFileWorkspace(FIRST_FILE, SECOND_FILE, 'first');
         await setupEditor(FIXTURE, { line: 0, ch: 0 });
         await setRpcEnabled(true);
         spawnedPid = (await waitForConnected()).pid;
@@ -459,49 +493,75 @@ vim.api.nvim_win_set_cursor(0, { 3, 3 })`,
         await expect(underline.text).toBe('alpha');
     });
 
-    it('does not attach a vim.lsp.enable() registered after buftype is acwrite', async () => {
-        const outcome = (await execLua(
-            `local buf = vim.api.nvim_get_current_buf()
-vim.lsp.config('vimmotionslate', {
+    it('re-opens the LSP document when the mirrored note changes', async () => {
+        await activateFile(FIRST_FILE);
+        await execLua('_G.vim_motions_lsp_events = {}');
+        await activateFile(SECOND_FILE);
+        await browser.waitUntil(async () => (await lspEvents()).length >= 2, {
+            timeout: 10000,
+            interval: 50,
+            timeoutMsg:
+                'the server to observe a document lifecycle for the note switch',
+        });
+        const events = await lspEvents();
+        // One buffer is renamed rather than reopened, so without an explicit
+        // pair the server keeps attributing edits to the previous note.
+        await expect(
+            events.some(
+                (event) =>
+                    event.startsWith('textDocument/didClose') &&
+                    event.endsWith(FIRST_FILE),
+            ),
+        ).toBe(true);
+        await expect(
+            events.some(
+                (event) =>
+                    event.startsWith('textDocument/didOpen') &&
+                    event.endsWith(SECOND_FILE),
+            ),
+        ).toBe(true);
+    });
+
+    it('keeps a client attached to the mirror after switching notes', async () => {
+        await activateFile(FIRST_FILE);
+        await activateFile(SECOND_FILE);
+        await expect(await attachedClients()).toContain('vimmotionsprobe');
+    });
+
+    it('attaches a late vim.lsp.enable() on the next note activation', async () => {
+        await activateFile(FIRST_FILE);
+        await execLua(
+            `vim.lsp.config('vimmotionslate', {
   cmd = vim.g.vim_motions_lsp_server,
   filetypes = { 'markdown' },
   root_dir = function(bufnr, on_dir)
     on_dir(vim.fs.dirname(vim.api.nvim_buf_get_name(bufnr)))
   end,
 })
-vim.lsp.enable('vimmotionslate')
-vim.cmd('filetype detect')
-local function attached(name)
-  for _, client in ipairs(vim.lsp.get_clients({ bufnr = buf })) do
-    if client.name == name then return true end
-  end
-  return false
-end
-vim.wait(2000, function() return attached('vimmotionslate') end, 50)
-local afterEnable = attached('vimmotionslate')
-
-local id = vim.lsp.start(
-  { name = 'vimmotionsexplicit', cmd = vim.g.vim_motions_lsp_server,
-    root_dir = vim.fs.dirname(vim.api.nvim_buf_get_name(buf)) },
-  { bufnr = buf }
-)
-vim.wait(4000, function() return attached('vimmotionsexplicit') end, 50)
-local afterStart = attached('vimmotionsexplicit')
-if id then pcall(vim.lsp.stop_client, id, true) end
-vim.lsp.enable('vimmotionslate', false)
-return {
-  buftype = vim.bo[buf].buftype,
-  attachedByEnable = afterEnable,
-  attachedByExplicitStart = afterStart,
-}`,
-        )) as LateEnableOutcome;
-        await expect(outcome.buftype).toBe('acwrite');
-        // The gap: the declarative path every modern Neovim config uses gets
-        // exactly one chance, at the first activation, and silently no-ops
-        // afterwards because the mirror buffer is reused with buftype set.
-        await expect(outcome.attachedByEnable).toBe(false);
-        // Positive control: the identical server started explicitly on the
-        // identical buffer does attach, so buftype is the cause, not the server.
-        await expect(outcome.attachedByExplicitStart).toBe(true);
+vim.lsp.enable('vimmotionslate')`,
+        );
+        // A bare `filetype detect` cannot attach it: Neovim skips a buffer
+        // whose buftype is already set, and the mirror is acwrite between
+        // activations. An activation clears buftype first, so this is the path
+        // that has to work.
+        await execLua('vim.cmd("filetype detect")');
+        await expect(await attachedClients()).not.toContain('vimmotionslate');
+        await activateFile(SECOND_FILE);
+        await browser.waitUntil(
+            async () => (await attachedClients()).includes('vimmotionslate'),
+            {
+                timeout: 10000,
+                interval: 50,
+                timeoutMsg:
+                    'a late vim.lsp.enable() to attach on the next activation',
+            },
+        );
+        await expect(await attachedClients()).toContain('vimmotionslate');
+        await execLua(
+            `vim.lsp.enable('vimmotionslate', false)
+for _, client in ipairs(vim.lsp.get_clients({ name = 'vimmotionslate' })) do
+  pcall(vim.lsp.stop_client, client.id, true)
+end`,
+        );
     });
 });
