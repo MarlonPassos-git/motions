@@ -265,70 +265,107 @@ describe('Neovim RPC native capability boundary', function () {
         });
     });
 
-    describe('extmark fields the bridge drops', () => {
-        it('does not render virt_lines, which blocks diagnostic virtual_lines and code lens', async () => {
+    describe('extmark fields the bridge now carries', () => {
+        it('renders virt_lines below the line, for diagnostic virtual_lines and code lens', async () => {
             await setProbeMarks(`{
   virt_lines = { { { probe_opts_marker, 'ErrorMsg' } } },
   priority = 100,
 }`);
             await waitForControl();
-            const texts = await renderedVirtTexts();
-            // Control present, probe absent: forwarding is alive and this
-            // specific field is what fails to cross.
-            await expect(texts.some((t) => t.includes(CONTROL_TEXT))).toBe(
-                true,
+            await browser.waitUntil(
+                async () =>
+                    browser.executeObsidian(() =>
+                        [
+                            ...document.querySelectorAll<HTMLElement>(
+                                '.vim-motions-rpc-virt-lines',
+                            ),
+                        ].some((element) =>
+                            (element.textContent ?? '').includes(
+                                'PROBE_UNSUPPORTED',
+                            ),
+                        ),
+                    ),
+                {
+                    timeout: 10000,
+                    interval: 50,
+                    timeoutMsg:
+                        'a virt_lines block widget to render below the line',
+                },
             );
-            await expect(texts.some((t) => t.includes(PROBE_TEXT))).toBe(false);
-            await expect(await documentText()).not.toContain(PROBE_TEXT);
+            const rendered = await browser.executeObsidian(() =>
+                [
+                    ...document.querySelectorAll<HTMLElement>(
+                        '.vim-motions-rpc-virt-lines',
+                    ),
+                ].map((element) => element.textContent ?? ''),
+            );
+            await expect(rendered.join('|')).toContain(PROBE_TEXT);
         });
 
-        it('does not render sign_text, which blocks diagnostic signs and gitsigns', async () => {
+        it('renders sign_text in the sign gutter, for diagnostic signs and gitsigns', async () => {
             await setProbeMarks(`{
   sign_text = 'E>',
   sign_hl_group = 'ErrorMsg',
   priority = 100,
 }`);
             await waitForControl();
+            await browser.waitUntil(
+                async () =>
+                    browser.executeObsidian(() =>
+                        [
+                            ...document.querySelectorAll<HTMLElement>(
+                                '.cm-gutter, .vim-motions-sign-gutter',
+                            ),
+                        ]
+                            .map((element) => element.textContent ?? '')
+                            .join('|')
+                            .includes('E>'),
+                    ),
+                {
+                    timeout: 10000,
+                    interval: 50,
+                    timeoutMsg: 'sign_text to reach the sign gutter',
+                },
+            );
             const gutters = await browser.executeObsidian(() =>
                 [
                     ...document.querySelectorAll<HTMLElement>(
-                        '.vim-motions-sign-gutter, .cm-gutter',
+                        '.cm-gutter, .vim-motions-sign-gutter',
                     ),
                 ].map((element) => element.textContent ?? ''),
             );
-            await expect(
-                (await renderedVirtTexts()).some((t) =>
-                    t.includes(CONTROL_TEXT),
-                ),
-            ).toBe(true);
-            // Self-guard: a gutter query that matched nothing would satisfy
-            // the absence assertion below without proving anything.
             await expect(gutters.length).toBeGreaterThan(0);
-            await expect(gutters.join('|')).not.toContain('E>');
+            await expect(gutters.join('|')).toContain('E>');
         });
 
-        it('does not render line_hl_group, which blocks whole-line diagnostic and debugger highlighting', async () => {
+        it('renders line_hl_group across the whole line', async () => {
             await setProbeMarks(`{
   line_hl_group = 'ErrorMsg',
-  number_hl_group = 'ErrorMsg',
   priority = 100,
 }`);
             await waitForControl();
+            await browser.waitUntil(
+                async () =>
+                    browser.executeObsidian(
+                        () =>
+                            document.querySelectorAll(
+                                '.cm-line.vim-hl-ErrorMsg',
+                            ).length > 0,
+                    ),
+                {
+                    timeout: 10000,
+                    interval: 50,
+                    timeoutMsg: 'line_hl_group to reach the rendered line',
+                },
+            );
             const counts = await browser.executeObsidian(() => ({
                 lines: document.querySelectorAll('.cm-line').length,
                 highlighted: document.querySelectorAll(
                     '.cm-line.vim-hl-ErrorMsg',
                 ).length,
             }));
-            await expect(
-                (await renderedVirtTexts()).some((t) =>
-                    t.includes(CONTROL_TEXT),
-                ),
-            ).toBe(true);
-            // Self-guard: zero rendered lines would make the absence
-            // assertion below true for the wrong reason.
             await expect(counts.lines).toBeGreaterThan(0);
-            await expect(counts.highlighted).toBe(0);
+            await expect(counts.highlighted).toBeGreaterThan(0);
         });
     });
 

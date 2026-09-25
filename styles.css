@@ -1867,3 +1867,10 @@ settings:
 .cm-editor .vim-motions-rpc-visual {
     background-color: var(--text-selection);
 }
+
+.cm-editor .vim-motions-rpc-virt-lines {
+    padding-left: var(--size-4-2);
+    font-family: var(--font-monospace);
+    font-size: var(--font-smaller);
+    white-space: pre;
+}
