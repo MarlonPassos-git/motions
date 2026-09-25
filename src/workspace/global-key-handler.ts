@@ -264,6 +264,28 @@ export class GlobalKeyHandler {
             }
         }
 
+        // Continue accumulating count digits if already in count mode.
+        // MUST precede the gate block: an unmapped digit yields
+        // `gateApplies === null`, whose branch returns unconditionally, so
+        // moving this below it truncates every count to its first digit.
+        if (
+            this.countActive &&
+            this.keyBuffer.length === 0 &&
+            !e.ctrlKey &&
+            !e.altKey &&
+            !e.metaKey &&
+            !e.shiftKey &&
+            e.key >= '0' &&
+            e.key <= '9'
+        ) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.count = this.count * 10 + parseInt(e.key, 10);
+            this.startTimeout();
+            this.updateChord(doc);
+            return;
+        }
+
         if (this.keyBuffer.length === 0) {
             if (gateApplies === 'structural') {
                 if (!this.shouldInterceptStructural(e, doc)) return;
@@ -292,25 +314,6 @@ export class GlobalKeyHandler {
                 }
                 return;
             }
-        }
-
-        // Continue accumulating count digits if already in count mode
-        if (
-            this.countActive &&
-            this.keyBuffer.length === 0 &&
-            !e.ctrlKey &&
-            !e.altKey &&
-            !e.metaKey &&
-            !e.shiftKey &&
-            e.key >= '0' &&
-            e.key <= '9'
-        ) {
-            e.preventDefault();
-            e.stopPropagation();
-            this.count = this.count * 10 + parseInt(e.key, 10);
-            this.startTimeout();
-            this.updateChord(doc);
-            return;
         }
 
         e.preventDefault();

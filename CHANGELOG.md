@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Multi-digit counts now reach global key bindings** — every count typed outside the editor was truncated to its first digit, so `12gt` went to tab 1 and `30j` scrolled three lines instead of thirty. The first digit is captured in the `gateApplies === null` branch of the gate block, and that branch returns unconditionally for any key it does not consume. The continuation accumulator sat _below_ the gate block, so it was unreachable for a second digit — an unmapped digit always resolves to `gateApplies === null` and returns there. Single-digit counts were unaffected, which is why this went unnoticed; `3gt` and its test have always passed. The accumulator now runs before the gate block, and carries a note that the ordering is load-bearing.
+    - Plugin: `src/workspace/global-key-handler.ts`
+
+### Tests
+
+- 4 unit cases in `test/unit/global-key-handler.test.ts` cover two-digit, four-digit, and trailing-zero counts dispatched to a `builtin` action, plus `12gt` across a multi-key chord — a separate path, since the count has to survive a partial match and a timeout restart. Each was negative-controlled by restoring the pre-fix file verbatim: `12x` delivered `1`, `9999x` delivered `9`, `30x` delivered `3`, and `12gt` delivered `1`. All four returned green once the fix was restored.
+
 ## [1.1.1] - 2026-09-25
 
 ### Changed

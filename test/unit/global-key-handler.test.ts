@@ -146,6 +146,62 @@ describe('GlobalKeyHandler', () => {
             expect(received).toBe(3);
         });
 
+        it('accumulates a two-digit count typed before the key', () => {
+            let received = -1;
+            registry.addMapping(
+                'x',
+                {
+                    type: 'builtin',
+                    fn: (_app, count) => {
+                        received = count;
+                    },
+                },
+                { source: 'default', gate: 'structural' },
+            );
+
+            pressKey('1');
+            pressKey('2');
+            pressKey('x');
+            expect(received).toBe(12);
+        });
+
+        it('accumulates a four-digit count typed before the key', () => {
+            let received = -1;
+            registry.addMapping(
+                'x',
+                {
+                    type: 'builtin',
+                    fn: (_app, count) => {
+                        received = count;
+                    },
+                },
+                { source: 'default', gate: 'structural' },
+            );
+
+            for (const digit of '9999') pressKey(digit);
+            pressKey('x');
+            expect(received).toBe(9999);
+        });
+
+        it('treats a trailing zero as a count digit, not a count start', () => {
+            let received = -1;
+            registry.addMapping(
+                'x',
+                {
+                    type: 'builtin',
+                    fn: (_app, count) => {
+                        received = count;
+                    },
+                },
+                { source: 'default', gate: 'structural' },
+            );
+
+            pressKey('3');
+            pressKey('0');
+            pressKey('x');
+            expect(received).toBe(30);
+        });
+
         it('count resets after dispatch', () => {
             const received: number[] = [];
             registry.addMapping(
@@ -241,6 +297,27 @@ describe('GlobalKeyHandler', () => {
             pressKey('t');
 
             expect(receivedCount).toBe(3);
+        });
+
+        it('12gt triggers nth-tab branch with count=12', () => {
+            let receivedCount = -1;
+            registry.addMapping(
+                'gt',
+                {
+                    type: 'builtin',
+                    fn: (_app2, count) => {
+                        receivedCount = count;
+                    },
+                },
+                { source: 'default', gate: 'structural' },
+            );
+
+            pressKey('1');
+            pressKey('2');
+            pressKey('g');
+            pressKey('t');
+
+            expect(receivedCount).toBe(12);
         });
 
         it('1gt triggers nth-tab branch with count=1', () => {
