@@ -1,4 +1,5 @@
 import { browser, expect } from '@wdio/globals';
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getNotices, loadTwoFileWorkspace, setupEditor } from '../helpers';
 import { requireRpcPrerequisites } from './rpc-prerequisites';
@@ -67,6 +68,21 @@ const SECOND_FILE = 'Target.md';
 const HOVER_BODY = 'VIM_MOTIONS_HOVER_BODY';
 const DIAGNOSTIC_MESSAGE = 'VIM_MOTIONS_LSP_DIAGNOSTIC';
 const COMPLETION_ITEMS = ['probeAlphaItem', 'probeBetaItem'];
+
+/**
+ * macOS reaches `/var` through a firmlink to `/private/var`. Neovim resolves it
+ * when naming the buffer and Obsidian's adapter does not, so the two spellings
+ * name the same file and an exact string comparison fails on macOS only. A
+ * path that does not exist — which is what the relative-path defect produces —
+ * resolves to itself and still fails the comparison.
+ */
+function resolveReal(path: string): string {
+    try {
+        return realpathSync(path);
+    } catch {
+        return path;
+    }
+}
 
 function pidIsAlive(pid: number): boolean {
     try {
@@ -373,8 +389,8 @@ end`,
             return adapter.getFullPath(file.path);
         });
         // A synthetic or relative name is what would break LSP root
-        // resolution, so assert the exact path rather than a suffix.
-        await expect(bufferName).toBe(vaultPath);
+        // resolution, so assert the whole path rather than a suffix.
+        await expect(resolveReal(bufferName)).toBe(resolveReal(vaultPath));
         await expect(bufferName.endsWith('.md')).toBe(true);
     });
 

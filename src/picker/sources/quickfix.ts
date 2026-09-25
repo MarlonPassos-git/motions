@@ -54,19 +54,38 @@ const SEVERITY: Record<string, string> = {
 };
 
 /**
+ * macOS reaches `/var` through a firmlink to `/private/var`, and the two sides
+ * disagree about which spelling to use: Obsidian reports the vault base
+ * unresolved while Neovim resolves it when naming a buffer. Normalising both
+ * ends is what stops every quickfix entry on macOS rendering as an absolute
+ * path and refusing to open.
+ */
+function stripPrivate(path: string): string {
+    const normalized = path.replace(/\\/gu, '/').replace(/\/+$/u, '');
+    return normalized.startsWith('/private/')
+        ? normalized.slice('/private'.length)
+        : normalized;
+}
+
+/**
  * Neovim reports absolute paths; Obsidian navigates by vault-relative ones, and
  * an entry outside the vault has no vault path at all rather than a wrong one.
  */
-function vaultRelative(app: App, absolute: string): string | null {
-    if (!absolute) return null;
-    const adapter = app.vault.adapter;
-    if (!(adapter instanceof FileSystemAdapter)) return null;
-    const base = adapter.getBasePath().replace(/[/\\]+$/u, '');
-    const normalized = absolute.replace(/\\/gu, '/');
-    const prefix = `${base.replace(/\\/gu, '/')}/`;
+export function vaultRelative(
+    basePath: string,
+    absolute: string,
+): string | null {
+    if (!absolute || !basePath) return null;
+    const prefix = `${stripPrivate(basePath)}/`;
+    const normalized = stripPrivate(absolute);
     return normalized.startsWith(prefix)
         ? normalized.slice(prefix.length)
         : null;
+}
+
+function vaultBasePath(app: App): string | null {
+    const adapter = app.vault.adapter;
+    return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
 }
 
 export function createQuickfixSource(
@@ -86,8 +105,11 @@ export function createQuickfixSource(
                 QUICKFIX_LUA,
                 [],
             ])) as QuickfixEntry[];
+            const basePath = vaultBasePath(app);
             return entries.map((entry, index): PickerItem => {
-                const path = vaultRelative(app, entry.filename);
+                const path = basePath
+                    ? vaultRelative(basePath, entry.filename)
+                    : null;
                 const where = path ?? entry.filename;
                 const position = entry.lnum > 0 ? `:${entry.lnum}` : '';
                 return {

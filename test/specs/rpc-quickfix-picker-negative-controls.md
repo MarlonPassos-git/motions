@@ -24,3 +24,25 @@ quickfix list is empty` stayed green, correctly — it asserts the empty case
     assertion pairs an exact `Welcome.md:2` match with
     `not.toContain('/')`, because an exact match alone would still pass if a
     second, absolute entry were present.
+
+## macOS firmlink regression, caught by CI
+
+`shows each entry as a vault-relative path and line` failed on the
+`macos-latest` shard while passing on every Linux shard:
+
+```
+Expected value: "Welcome.md:2"
+Received array: ["/private/var/folders/.../test-vault-S0WuO7/Welcome.md:2", ...]
+```
+
+This was a product defect rather than a test artefact. macOS reaches `/var`
+through a firmlink to `/private/var`; Neovim resolves it when naming a buffer
+and Obsidian's adapter does not, so the prefix test in `vaultRelative()` never
+matched and every entry fell back to the "outside the vault" representation —
+absolute label, and `onSelect` doing nothing.
+
+The regression is now held by `test/unit/picker/quickfix-path.test.ts` rather
+than only by a macOS runner, which required making `vaultRelative()` pure and
+taking a base path instead of an `App`. Control: removing the `/private`
+normalisation fails exactly the two firmlink cases and leaves the other four
+green.
