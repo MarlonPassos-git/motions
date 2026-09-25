@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Both CodeMirror forks are now consumed from the npm registry instead of git URLs** — npm 12 blocks a dependency's install scripts unless the root package's `allowScripts` policy covers them, and `prepare` counts as an install script for non-registry sources. A git dependency **cannot** be approved: an `allowScripts` entry for it, pinned (`@saberzero1/codemirror-vim@6.3.0`) or name-only, is still reported as uncovered, while a registry package with a postinstall (`esbuild@0.28.1`) approves normally. Both forks build their `dist/` in `prepare` and commit no build output, so under npm 12 they installed as `LICENSE`, `package.json` and `README.md` alone — measured with the community scanner's own analysis command, `npm ci --allow-git=all --allow-remote=all --ignore-scripts`, which left no `dist/index.js` and no `dist/index.d.ts`, breaking `npm run build` and `typecheck` together. Publishing to a scope we own and consuming through `npm:` aliases sidesteps the policy, because registry dependencies are exempt from it even when the published package still declares `prepare` — upstream `@codemirror/autocomplete` does, and installs clean under `--strict-allow-scripts`. The aliases preserve the original import specifiers, so no source file and neither `overrides` block changed, and the published output is byte-identical to what a git install built across all four files of both packages. The lockfile now carries no git or otherwise non-registry `resolved` entry at all, so the plugin also installs under npm 12's bare defaults, where `allow-git` and `allow-remote` both default to `"none"`, and no longer depends on any scanner escape hatch.
+    - Plugin: `package.json` (`@replit/codemirror-vim` → `npm:@saberzero1/codemirror-vim@^6.3.0`, `@codemirror/autocomplete` → `npm:@saberzero1/codemirror-autocomplete@^6.20.3`), `package-lock.json`
+    - Fork: `~/Repos/codemirror-vim` — published as `@saberzero1/codemirror-vim`, with a new `.github/workflows/publish.yml` that publishes over OIDC trusted publishing with no token and is gated on the version being absent from the registry. The `publish` script is renamed to `release`, because `publish` is a real npm lifecycle hook that runs after upload and would have re-entered `npm publish` on every success. `.gitignore` now un-ignores `.github`: its blanket `.*` rule matched the new workflow, so `git add` skipped it silently, and the existing workflows survive only because they predate that rule. The workflow publishes with `--ignore-scripts` and sets an empty `NODE_AUTH_TOKEN` for its install step, because `actions/setup-node`'s `registry-url` writes an `.npmrc` containing a literal `${NODE_AUTH_TOKEN}` that npm ignores but yarn 1 aborts on, and this fork's `prepare` shells out to yarn.
+    - Fork: `~/Repos/autocomplete` — published as `@saberzero1/codemirror-autocomplete`, with the same publish workflow. A `files` allowlist now drops `.direnv`, `flake.nix`, `flake.lock` and `.envrc` from the tarball, which `.npmignore` never excluded: 14 files and 89.2 kB down to 9 files and 70.0 kB.
+
+### Documentation
+
+- `AGENTS.md`: replaced the git-URL dependency mandate with the registry-alias rule, including why a git dependency cannot be allow-listed and the note that `npm install` will not re-resolve a spec changed from git to an alias; added a fork-publishing section covering the trusted-publisher filename coupling and the yarn/`.npmrc` interaction
+- `CHANGELOG.md`
+- `docs/development/index.md`: rewrote the dependency-URL warning as a dependency-spec warning and added a "Shipping a fork change" callout
+
 ## [1.1.0] - 2026-09-25
 
 ### Added
