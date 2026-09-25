@@ -14,6 +14,7 @@ vi.mock('../../src/ui/hint-mode', () => ({
 
 import { GlobalKeyHandler } from '../../src/workspace/global-key-handler';
 import { GlobalMappingRegistry } from '../../src/workspace/global-mapping-registry';
+import { registerDefaultGlobalMappings } from '../../src/workspace/global-defaults';
 import { observeKeys } from '../../src/workspace/key-observer';
 import { executeCommand } from '../../src/workspace/navigation';
 
@@ -23,8 +24,10 @@ let capturedListener: KeydownListener | null = null;
 let pointerListener: ((e: Partial<PointerEvent>) => void) | null = null;
 let focusListener: ((e: Partial<FocusEvent>) => void) | null = null;
 let activeViewType = 'graph';
+let rootSplitViewType = 'markdown';
 let focusedElement: Element | null = null;
 let targetInsideExplorer = true;
+let scrollTarget: { scrollBy: ReturnType<typeof vi.fn> } | null = null;
 let settings: VimMotionsSettings;
 
 class MockKeyboardEvent {
@@ -49,6 +52,13 @@ class MockKeyboardEvent {
         this.bubbles = init.bubbles ?? false;
         this.cancelable = init.cancelable ?? false;
     }
+
+    // A real KeyboardEvent carries these; without them a synthetic event
+    // re-entering onKeydown throws instead of exercising the behaviour.
+    // Prototype methods, so deep-equality on the event still sees only data.
+    preventDefault(): void {}
+    stopPropagation(): void {}
+    stopImmediatePropagation(): void {}
 }
 
 function makeMockDoc(): Document {
@@ -88,9 +98,22 @@ function makeApp(mockDoc: Document): App {
                           },
                       ]
                     : [],
+            // Returns the ROOT-SPLIT leaf, "while a sidebar leaf might be
+            // active" — it must not track activeViewType, or gate decisions
+            // are tested against a layout Obsidian cannot produce.
             getMostRecentLeaf: () => ({
-                view: { getViewType: () => activeViewType },
+                view: {
+                    getViewType: () => rootSplitViewType,
+                    containerEl: { querySelector: () => null },
+                },
             }),
+            getActiveViewOfType: () =>
+                scrollTarget
+                    ? {
+                          getMode: () => 'preview',
+                          containerEl: { querySelector: () => scrollTarget },
+                      }
+                    : null,
             on: () => ({ id: 'ref' }),
             offref: () => {},
         },
@@ -133,6 +156,7 @@ function pressKey(
 }
 
 describe('GlobalKeyHandler', () => {
+    let currentApp: App;
     let registry: GlobalMappingRegistry;
     let handler: GlobalKeyHandler;
 
@@ -142,10 +166,13 @@ describe('GlobalKeyHandler', () => {
         pointerListener = null;
         focusListener = () => {};
         activeViewType = 'graph';
+        rootSplitViewType = 'markdown';
         focusedElement = null;
         targetInsideExplorer = true;
+        scrollTarget = null;
         const mockDoc = makeMockDoc();
         const app = makeApp(mockDoc);
+        currentApp = app;
         settings = makeSettings();
         registry = new GlobalMappingRegistry();
         handler = new GlobalKeyHandler(app, settings, null, registry);
@@ -159,6 +186,24 @@ describe('GlobalKeyHandler', () => {
     });
 
     describe('file explorer navigation', () => {
+        // These keys are ordinary registry entries, so the block must
+        // exercise the real registrations rather than an empty registry.
+        const useDefaults = (enableWorkspaceNav = true) => {
+            registry.clear();
+            registerDefaultGlobalMappings(
+                registry,
+                currentApp,
+                null,
+                undefined,
+                undefined,
+                {
+                    enableWorkspaceNav,
+                },
+            );
+        };
+
+        beforeEach(() => useDefaults());
+
         it.each([
             ['h', 'ArrowLeft'],
             ['j', 'ArrowDown'],
@@ -177,8 +222,7 @@ describe('GlobalKeyHandler', () => {
 
             expect({
                 prevented: vi.mocked(event.preventDefault!).mock.calls.length,
-                stopped: vi.mocked(event.stopImmediatePropagation!).mock.calls
-                    .length,
+                stopped: vi.mocked(event.stopPropagation!).mock.calls.length,
                 dispatched: dispatchEvent.mock.calls.length,
                 arrowEvent,
             }).toEqual({
@@ -221,6 +265,10 @@ describe('GlobalKeyHandler', () => {
                     event?: Record<string, unknown>;
                     focused?: Partial<HTMLElement>;
                     viewType?: string;
+                    // Outside the explorer j/k are still the scroll mapping,
+                    // so the key is legitimately claimed. What must never
+                    // happen anywhere in this table is an arrow dispatch.
+                    scrollClaimsKey?: boolean;
                 },
             ]
         > = [
@@ -236,8 +284,14 @@ describe('GlobalKeyHandler', () => {
                     },
                 },
             ],
-            ['another view is active', { viewType: 'markdown' }],
-            ['the key target is outside the explorer', {}],
+            [
+                'another view is active',
+                { viewType: 'markdown', scrollClaimsKey: true },
+            ],
+            [
+                'the key target is outside the explorer',
+                { scrollClaimsKey: true },
+            ],
             [
                 'a contenteditable rename control is focused',
                 {
@@ -259,6 +313,7 @@ describe('GlobalKeyHandler', () => {
                 focusedElement = (context.focused ?? null) as Element | null;
                 if (context.settingsEnabled === false) {
                     settings.enableWorkspaceNav = false;
+                    useDefaults(false);
                 }
                 const dispatchEvent = vi.fn(() => true);
 
@@ -270,10 +325,14 @@ describe('GlobalKeyHandler', () => {
                 expect({
                     prevented: vi.mocked(event.preventDefault!).mock.calls
                         .length,
-                    stopped: vi.mocked(event.stopImmediatePropagation!).mock
-                        .calls.length,
+                    stopped: vi.mocked(event.stopPropagation!).mock.calls
+                        .length,
                     dispatched: dispatchEvent.mock.calls.length,
-                }).toEqual({ prevented: 0, stopped: 0, dispatched: 0 });
+                }).toEqual({
+                    prevented: context.scrollClaimsKey ? 1 : 0,
+                    stopped: context.scrollClaimsKey ? 1 : 0,
+                    dispatched: 0,
+                });
             },
         );
 
@@ -289,7 +348,7 @@ describe('GlobalKeyHandler', () => {
             expect(
                 dispatchEvent.mock.calls.map(([arrow]) => arrow.key),
             ).toEqual(['ArrowDown', 'ArrowDown', 'ArrowDown']);
-            expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+            expect(event.stopPropagation).toHaveBeenCalledOnce();
         });
 
         it('caps repeated explorer movement to avoid blocking the UI', () => {
@@ -335,6 +394,117 @@ describe('GlobalKeyHandler', () => {
             pressKey('j', { target: { dispatchEvent } });
 
             expect(dispatchEvent).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('file explorer keys as registry entries', () => {
+        const useDefaults = (enableWorkspaceNav = true) => {
+            registry.clear();
+            registerDefaultGlobalMappings(
+                registry,
+                currentApp,
+                null,
+                undefined,
+                undefined,
+                { enableWorkspaceNav },
+            );
+        };
+        beforeEach(() => useDefaults());
+
+        it.each(['h', 'l'])(
+            'does not swallow %s outside the file explorer',
+            (key) => {
+                activeViewType = 'graph';
+                targetInsideExplorer = false;
+                const dispatchEvent = vi.fn(() => true);
+
+                const event = pressKey(key, { target: { dispatchEvent } });
+
+                expect({
+                    prevented: vi.mocked(event.preventDefault!).mock.calls
+                        .length,
+                    dispatched: dispatchEvent.mock.calls.length,
+                }).toEqual({ prevented: 0, dispatched: 0 });
+            },
+        );
+
+        it.each([
+            ['j', 1],
+            ['k', -1],
+        ])('%s still scrolls outside the file explorer', (key, sign) => {
+            activeViewType = 'graph';
+            targetInsideExplorer = false;
+            scrollTarget = { scrollBy: vi.fn() };
+
+            pressKey(key, { target: { dispatchEvent: vi.fn(() => true) } });
+
+            const calls = scrollTarget.scrollBy.mock.calls as [
+                { top: number },
+            ][];
+            expect({
+                scrolls: calls.length,
+                direction: calls[0] ? Math.sign(calls[0][0].top) : 0,
+            }).toEqual({ scrolls: 1, direction: sign });
+        });
+
+        it.each([
+            ['j', 'editor:focus-bottom'],
+            ['k', 'editor:focus-top'],
+            ['l', 'editor:focus-right'],
+        ])('<C-w>%s still reaches its pane command', (key, command) => {
+            activeViewType = 'file-explorer';
+            pressKey('w', { ctrlKey: true });
+            pressKey(key, { target: { dispatchEvent: vi.fn(() => true) } });
+
+            expect(
+                vi.mocked(executeCommand).mock.calls.map((c) => c[1]),
+            ).toEqual([command]);
+        });
+
+        it('leaves h unregistered when workspace navigation is off', () => {
+            useDefaults(false);
+            expect(
+                registry.getAllEntries().map((entry) => entry.keys),
+            ).not.toContain('h');
+        });
+
+        it('lets a user mapping override the explorer h', () => {
+            registry.addMapping(
+                'h',
+                { type: 'obcommand', commandId: 'app:go-back' },
+                { source: 'user', gate: 'standard' },
+            );
+            activeViewType = 'file-explorer';
+            const dispatchEvent = vi.fn(() => true);
+
+            pressKey('h', { target: { dispatchEvent } });
+
+            expect({
+                commands: vi.mocked(executeCommand).mock.calls.map((c) => c[1]),
+                arrowsDispatched: dispatchEvent.mock.calls.length,
+            }).toEqual({ commands: ['app:go-back'], arrowsDispatched: 0 });
+        });
+
+        it('prefers a structural sibling over explorer on a shared prefix (synthetic)', () => {
+            registry.clear();
+            registry.addMapping(
+                'hx',
+                { type: 'builtin', fn: () => {} },
+                { source: 'default', gate: 'explorer' },
+            );
+            registry.addMapping(
+                'hh',
+                { type: 'builtin', fn: () => {} },
+                { source: 'default', gate: 'structural' },
+            );
+            activeViewType = 'graph';
+            targetInsideExplorer = false;
+
+            const event = pressKey('h', {
+                target: { dispatchEvent: vi.fn(() => true) },
+            });
+
+            expect(vi.mocked(event.preventDefault!).mock.calls.length).toBe(1);
         });
     });
 

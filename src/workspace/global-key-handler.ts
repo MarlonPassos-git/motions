@@ -5,21 +5,16 @@ import { executeCommand } from './navigation';
 import { executeGlobalExCommand } from '../ui/global-ex-command';
 import { isHintModeActive } from '../ui/hint-mode';
 import type {
+    GlobalDispatchContext,
     GlobalMapEntry,
     GlobalMappingRegistry,
 } from './global-mapping-registry';
 import { normalizeKeyEvent } from './global-mapping-registry';
 import { observeKeyEvent } from './key-observer';
+import { FileExplorerContext } from './file-explorer-context';
 
 import { runCleanups } from '../util/cleanup';
 const SEQUENCE_TIMEOUT = 1000;
-const MAX_FILE_EXPLORER_MOVEMENTS = 100;
-const FILE_EXPLORER_ARROW_KEYS = new Map([
-    ['h', 'ArrowLeft'],
-    ['j', 'ArrowDown'],
-    ['k', 'ArrowUp'],
-    ['l', 'ArrowRight'],
-]);
 
 const GLOBAL_NAV_VIEW_TYPES = new Set([
     'markdown',
@@ -54,6 +49,7 @@ export class GlobalKeyHandler {
     private settings: VimMotionsSettings;
     private modeTracker: VimModeTracker | null;
     private registry: GlobalMappingRegistry;
+    private explorerContext: FileExplorerContext;
 
     private docs = new Set<Document>();
     private cleanups: (() => void)[] = [];
@@ -64,7 +60,6 @@ export class GlobalKeyHandler {
     private timer: number | null = null;
     private lastActiveDoc: Document | null = null;
     private translatedFileExplorerEvents = new WeakSet<KeyboardEvent>();
-    private fileExplorerDocs = new WeakSet<Document>();
 
     onGlobalChord?: (
         chord: string,
@@ -83,6 +78,7 @@ export class GlobalKeyHandler {
         this.settings = settings;
         this.modeTracker = modeTracker;
         this.registry = registry;
+        this.explorerContext = new FileExplorerContext(app);
     }
 
     // ── Lifecycle ───────────────────────────────────────────────
@@ -99,22 +95,7 @@ export class GlobalKeyHandler {
             },
         );
         this.cleanups.push(() => this.app.workspace.offref(ref));
-        const activeLeafRef = this.app.workspace.on(
-            'active-leaf-change',
-            (leaf) => {
-                for (const doc of this.docs) {
-                    if (
-                        leaf?.view.getViewType() === 'file-explorer' &&
-                        leaf.view.containerEl.ownerDocument === doc
-                    ) {
-                        this.fileExplorerDocs.add(doc);
-                    } else {
-                        this.fileExplorerDocs.delete(doc);
-                    }
-                }
-            },
-        );
-        this.cleanups.push(() => this.app.workspace.offref(activeLeafRef));
+        this.explorerContext.observeActiveLeaf();
     }
 
     private installOnDocument(doc: Document): void {
@@ -122,32 +103,16 @@ export class GlobalKeyHandler {
         this.docs.add(doc);
 
         const handler = (e: KeyboardEvent) => this.onKeydown(e, doc);
-        const trackPointer = (e: PointerEvent) => {
-            if (this.isFileExplorerTarget(e.target)) {
-                this.fileExplorerDocs.add(doc);
-            } else {
-                this.fileExplorerDocs.delete(doc);
-            }
-        };
-        const trackFocus = (e: FocusEvent) => {
-            if (this.isFileExplorerTarget(e.target)) {
-                this.fileExplorerDocs.add(doc);
-            } else {
-                this.fileExplorerDocs.delete(doc);
-            }
-        };
         doc.addEventListener('keydown', handler, true);
-        doc.addEventListener('pointerdown', trackPointer, true);
-        doc.addEventListener('focusin', trackFocus, true);
+        this.explorerContext.observeDocument(doc);
         this.cleanups.push(() => {
             doc.removeEventListener('keydown', handler, true);
-            doc.removeEventListener('pointerdown', trackPointer, true);
-            doc.removeEventListener('focusin', trackFocus, true);
         });
     }
 
     destroy(): void {
         this.resetSequence();
+        this.explorerContext.destroy();
         runCleanups(this.cleanups, 'global key handler');
         this.cleanups = [];
         this.docs.clear();
@@ -214,6 +179,13 @@ export class GlobalKeyHandler {
         return true;
     }
 
+    private shouldInterceptExplorer(e: KeyboardEvent, doc: Document): boolean {
+        if (e.isComposing) return false;
+        if (isEditorOrInputFocused(doc)) return false;
+        if (isModalOpen(doc)) return false;
+        return this.explorerContext.isActive(doc, e.target);
+    }
+
     private shouldInterceptStructural(
         e: KeyboardEvent,
         doc: Document,
@@ -245,82 +217,29 @@ export class GlobalKeyHandler {
         return GLOBAL_NAV_VIEW_TYPES;
     }
 
-    private isFileExplorerTarget(target: EventTarget | null): boolean {
-        return (
-            !!target &&
-            this.app.workspace
-                .getLeavesOfType('file-explorer')
-                .some((leaf) => leaf.view.containerEl.contains(target as Node))
-        );
-    }
-
-    private handleFileExplorerNavigation(
+    private makeDispatchContext(
         e: KeyboardEvent,
         doc: Document,
-    ): boolean {
-        if (!this.settings.enableWorkspaceNav) return false;
-        if (
-            e.defaultPrevented ||
-            e.ctrlKey ||
-            e.altKey ||
-            e.metaKey ||
-            e.shiftKey
-        )
-            return false;
-        if (isEditorOrInputFocused(doc) || isModalOpen(doc)) return false;
-        // Obsidian's tree keeps its own selection while keydown targets BODY.
-        // Track the last sidebar interaction so a ribbon click cannot reuse a
-        // stale active leaf. getMostRecentLeaf() favors the main area here.
-        if (
-            !this.isFileExplorerTarget(e.target) &&
-            !this.fileExplorerDocs.has(doc)
-        )
-            return false;
-
-        if (this.countActive && e.key >= '0' && e.key <= '9') {
-            e.preventDefault();
-            e.stopPropagation();
-            this.count = this.count * 10 + parseInt(e.key, 10);
-            this.startTimeout();
-            this.updateChord(doc);
-            return true;
-        }
-        if (!this.countActive && e.key >= '1' && e.key <= '9') {
-            e.preventDefault();
-            e.stopPropagation();
-            this.count = parseInt(e.key, 10);
-            this.countActive = true;
-            this.startTimeout();
-            this.updateChord(doc);
-            return true;
-        }
-
-        const arrowKey = FILE_EXPLORER_ARROW_KEYS.get(e.key);
-        const KeyboardEventCtor = doc.defaultView?.KeyboardEvent;
+    ): GlobalDispatchContext {
         const target = e.target;
-        if (!arrowKey || !KeyboardEventCtor || !target) return false;
-
-        e.preventDefault();
-        e.stopImmediatePropagation();
-
-        const repeat = this.countActive
-            ? Math.min(this.count, MAX_FILE_EXPLORER_MOVEMENTS)
-            : 1;
-        for (let i = 0; i < repeat; i++) {
-            const arrowEvent = new KeyboardEventCtor('keydown', {
-                key: arrowKey,
-                code: arrowKey,
-                bubbles: true,
-                cancelable: true,
-            });
-            this.translatedFileExplorerEvents.add(arrowEvent);
-            target.dispatchEvent(arrowEvent);
-        }
-        if (this.countActive) this.resetSequence();
-        return true;
+        return {
+            inFileExplorer: this.explorerContext.isActive(doc, target),
+            sendKey: (key: string) => {
+                const KeyboardEventCtor = doc.defaultView?.KeyboardEvent;
+                if (!KeyboardEventCtor || !target) return;
+                const synthetic = new KeyboardEventCtor('keydown', {
+                    key,
+                    code: key,
+                    bubbles: true,
+                    cancelable: true,
+                });
+                this.translatedFileExplorerEvents.add(synthetic);
+                target.dispatchEvent(synthetic);
+            },
+        };
     }
 
-    private dispatch(entry: GlobalMapEntry): void {
+    private dispatch(entry: GlobalMapEntry, ctx: GlobalDispatchContext): void {
         const action = entry.action;
         if (action.type === 'obcommand') {
             const repeat = this.count || 1;
@@ -335,7 +254,7 @@ export class GlobalKeyHandler {
                 this.openPicker,
             );
         } else if (action.type === 'builtin') {
-            action.fn(this.app, this.count);
+            action.fn(this.app, this.count, ctx);
         }
     }
 
@@ -357,17 +276,13 @@ export class GlobalKeyHandler {
         }
 
         if (e.isComposing) return;
-        if (
-            this.keyBuffer.length === 0 &&
-            this.handleFileExplorerNavigation(e, doc)
-        )
-            return;
 
         const key = normalizeKeyEvent(e);
         const prospectiveSeq = [...this.keyBuffer, key].join('');
 
         const matchResult = this.registry.resolve(prospectiveSeq);
-        let gateApplies: 'hint' | 'standard' | 'structural' | null = null;
+        let gateApplies:
+            'hint' | 'standard' | 'structural' | 'explorer' | null = null;
 
         if (matchResult.type === 'exact') {
             gateApplies = matchResult.entry.gate;
@@ -380,12 +295,21 @@ export class GlobalKeyHandler {
                 (entry) => entry.gate === 'standard',
             );
             const hasHint = completions.some((entry) => entry.gate === 'hint');
+            // 'explorer' is last so a co-registered structural/standard
+            // mapping wins a shared prefix. Single-key h/l take the exact
+            // match above, so this chain is defensive for future multi-key
+            // explorer mappings rather than a production path.
+            const hasExplorer = completions.some(
+                (entry) => entry.gate === 'explorer',
+            );
             if (hasStructural) {
                 gateApplies = 'structural';
             } else if (hasStandard) {
                 gateApplies = 'standard';
             } else if (hasHint) {
                 gateApplies = 'hint';
+            } else if (hasExplorer) {
+                gateApplies = 'explorer';
             }
         }
 
@@ -418,6 +342,8 @@ export class GlobalKeyHandler {
                 if (!this.shouldInterceptHints(e, doc)) return;
             } else if (gateApplies === 'standard') {
                 if (!this.shouldInterceptContent(e, doc)) return;
+            } else if (gateApplies === 'explorer') {
+                if (!this.shouldInterceptExplorer(e, doc)) return;
             } else {
                 if (
                     !e.ctrlKey &&
@@ -455,7 +381,7 @@ export class GlobalKeyHandler {
                 this.resetSequence();
                 return;
             }
-            this.dispatch(result.entry);
+            this.dispatch(result.entry, this.makeDispatchContext(e, doc));
             this.resetSequence();
         } else if (result.type === 'partial') {
             this.startTimeout();

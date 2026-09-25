@@ -151,7 +151,7 @@ When Obsidian's native File Explorer is active, unmodified `h`/`j`/`k`/`l` reuse
 
 Prefix a movement with a count to repeat it, for example `3j` moves three visible rows. Counts above 100 are capped at 100 movements so a large prefix cannot freeze the interface.
 
-These contextual aliases are enabled by **Settings → Vim Motions → Workspace navigation**. They operate after the File Explorer receives focus or a pointer interaction, even when Obsidian sends the keyboard event to the document body. Clicking outside the explorer clears that context. They do not run while renaming a file or folder, while another input or contenteditable control is focused, during composition, with a modifier key, or during a pending chord such as `<C-w>h`. The translated arrow event stays in the File Explorer's document, so the same native behavior works in Obsidian windows without reimplementing its tree logic.
+These keys are enabled by **Settings → Vim Motions → Workspace navigation**, which registers them alongside the other global bindings. They operate after the File Explorer receives focus or a pointer interaction, even when Obsidian sends the keyboard event to the document body. Clicking outside the explorer clears that context. They do not run while renaming a file or folder, while another input or contenteditable control is focused, during composition, with a modifier key, or during a pending chord such as `<C-w>h`. The translated arrow event stays in the File Explorer's document, so the same native behavior works in Obsidian windows without reimplementing its tree logic.
 
 ### Scrolling
 
@@ -173,7 +173,7 @@ Pressing `:` in a non-editor view opens a standalone command modal. This modal s
 
 ## Customizing global bindings
 
-Global mappings can be customized via `.obsidian.init.lua` or `.obsidian.vimrc`. These commands define, override, or remove key bindings that work outside the editor. The File Explorer `h`/`j`/`k`/`l` aliases above are fixed contextual translations controlled by the workspace navigation setting; they are not entries in the global mapping registry.
+Global mappings can be customized via `.obsidian.init.lua` or `.obsidian.vimrc`. These commands define, override, or remove key bindings that work outside the editor. The File Explorer `h`/`j`/`k`/`l` keys are ordinary entries in the same registry, so they can be remapped or removed like any other global binding — `gmap h :obcommand app:go-back` replaces the explorer `h`. Because `j` and `k` are the same entries that scroll elsewhere, remapping one replaces both meanings.
 
 ```lua
 -- Add a new binding in Lua
@@ -210,7 +210,7 @@ When a plugin view (such as Spaced Repetition flashcard review, Excalidraw, or a
 | `<C-o>`, `<C-i>`   | History back/forward          |
 | `:`                | Open command line             |
 
-Keys like `j`, `k`, `1`–`9`, `H`, `L`, and scroll commands pass through to plugin views, allowing each plugin to handle them natively. The native File Explorer is the deliberate exception: when workspace navigation is enabled, its `h`/`j`/`k`/`l` aliases translate to the view's own arrow-key behavior.
+Keys like `j`, `k`, `1`–`9`, `H`, `L`, and scroll commands pass through to plugin views, allowing each plugin to handle them natively. The native File Explorer is the deliberate exception: when workspace navigation is enabled, `h`/`j`/`k`/`l` translate to the view's own arrow-key behavior.
 
 ### Customizing the view type whitelist
 
