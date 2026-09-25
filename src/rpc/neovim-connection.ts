@@ -296,6 +296,9 @@ export class NeovimConnection {
                 this.cmdlineOverlay,
                 redrawDispatcher,
             );
+            documentSync.setMirrorObserver(() =>
+                this.popupMenuOverlay?.reanchor(),
+            );
             this.modeStatus = new NeovimModeStatus(
                 redrawDispatcher,
                 this.getModeTracker,

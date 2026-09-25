@@ -118,6 +118,7 @@ import {
 import { extmarkExtension } from './lua/extmarks';
 import { decorationProviderExtension } from './lua/decoration-provider';
 import { neovimDecorationExtension } from './rpc/decorations';
+import { neovimVisualSelectionExtension } from './rpc/visual-selection';
 import {
     foldSyncExtension,
     setFoldAwareNavigation,
@@ -224,6 +225,7 @@ import {
     GlobalMarkProvider,
 } from './picker/sources/mark-providers';
 import { createRegistersSource } from './picker/sources/registers';
+import { createQuickfixSource } from './picker/sources/quickfix';
 import { createPickersSource } from './picker/sources/pickers';
 import { installPickerAPI, uninstallPickerAPI } from './picker/api';
 import type { PickerAPI } from './picker/api';
@@ -1556,6 +1558,14 @@ export default class VimMotionsPlugin extends Plugin {
             },
         });
         this.addCommand({
+            id: 'picker-quickfix',
+            name: 'Picker: Quickfix list',
+            callback: () => {
+                if (!ensureVimEnabled()) return;
+                this.openPicker?.('quickfix');
+            },
+        });
+        this.addCommand({
             id: 'picker-marks',
             name: 'Picker: Jump to mark',
             callback: () => {
@@ -2293,6 +2303,13 @@ export default class VimMotionsPlugin extends Plugin {
         }
         pickerRegistry.register(createRegistersSource(vim), true);
         pickerRegistry.register(
+            createQuickfixSource(
+                (method, args) => this.neovimConnection.request(method, args),
+                () => this.neovimConnection.isConnected(),
+            ),
+            true,
+        );
+        pickerRegistry.register(
             createLiveGrepSource(buildRipgrepConfig()),
             true,
         );
@@ -2798,6 +2815,7 @@ export default class VimMotionsPlugin extends Plugin {
         this.vimExtensionSlot.push(extmarkExtension());
         this.vimExtensionSlot.push(decorationProviderExtension());
         this.vimExtensionSlot.push(neovimDecorationExtension());
+        this.vimExtensionSlot.push(neovimVisualSelectionExtension());
         this.vimExtensionSlot.push(createTableCellCursorGuard());
         this.vimExtensionSlot.push(
             createTableNavExtension(this.app, this.settings, getVimApi),
@@ -4110,10 +4128,31 @@ export default class VimMotionsPlugin extends Plugin {
         return {
             textwidth: this.settings.textwidth,
             listContinuation: this.settings.listContinuationOnOpen,
+            indent: this.vaultIndentStyle(),
             yankHighlight: {
                 mode: this.settings.yankHighlightMode,
                 duration: this.settings.yankHighlightDuration,
             },
+        };
+    }
+
+    private vaultIndentStyle(): { useTab: boolean; tabSize: number } {
+        let useTab: unknown;
+        let tabSize: unknown;
+        try {
+            useTab = getVaultConfig(this.app, 'useTab');
+            tabSize = getVaultConfig(this.app, 'tabSize');
+        } catch {
+            return { useTab: true, tabSize: 4 };
+        }
+        return {
+            useTab: typeof useTab === 'boolean' ? useTab : true,
+            tabSize:
+                typeof tabSize === 'number' &&
+                Number.isInteger(tabSize) &&
+                tabSize > 0
+                    ? tabSize
+                    : 4,
         };
     }
 

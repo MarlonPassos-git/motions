@@ -155,97 +155,100 @@ describe('Normal mode — z-prefix commands (Tier 1)', function () {
             expect(scrollZz).toBeLessThan(scrollZt);
         });
 
-        it('zt should place cursor line near the top of viewport, not center (#143)', async function () {
-            await setupEditor(CONTENT_WITH_FM, { line: 118, ch: 0 });
-            await browser.pause(PAUSE.EDITOR_SETTLE);
+        /**
+         * Both assertions below are expressed in display rows against the
+         * *measured* viewport and the *configured* `scrolloff`. Their previous
+         * forms — "within the top 15% of the viewport" and "zt and zz differ
+         * by more than 30% of the viewport" — encoded a `zt` that put the line
+         * flush at row 0, which stopped being true once `zt` started holding
+         * the `scrolloff` margin. Both passed on a 54-row window and on CI's
+         * 37-row Linux runner, and both failed on its ~25-row macOS and
+         * ~27-row Windows runners, at 0.202 and 161px respectively.
+         */
+        interface CursorLineGeometry {
+            rowsFromTop: number;
+            viewportRows: number;
+            lineHeight: number;
+            marginRows: number;
+        }
 
-            const info = (await browser.executeObsidian(({ app, obsidian }) => {
+        async function cursorLineGeometry(): Promise<CursorLineGeometry | null> {
+            return (await browser.executeObsidian(({ app, obsidian }) => {
                 const view = app.workspace.getActiveViewOfType(
                     obsidian.MarkdownView,
                 );
                 if (!view) return null;
-                const cm6 = (view.editor as unknown as Record<string, unknown>)
-                    .cm as
-                    | {
-                          scrollDOM: HTMLElement;
-                          contentDOM: HTMLElement;
-                          defaultLineHeight: number;
-                      }
-                    | undefined;
-                if (!cm6) return null;
+                const cm = (view.editor as unknown as Record<string, unknown>)
+                    .cm as import('@codemirror/view').EditorView | undefined;
+                if (!cm) return null;
+                const cursorLine = view.editor.getCursor().line;
+                const coords = cm.coordsAtPos(
+                    cm.state.doc.line(cursorLine + 1).from,
+                );
+                if (!coords) return null;
+                const plugin = (
+                    app as unknown as {
+                        plugins: {
+                            plugins: Record<
+                                string,
+                                { settings: { scrolloffLines: number } }
+                            >;
+                        };
+                    }
+                ).plugins.plugins['vim-motions'];
+                const scrolloff = plugin?.settings.scrolloffLines ?? 0;
+                const lineHeight = cm.defaultLineHeight || 22;
+                const viewportRows = cm.scrollDOM.clientHeight / lineHeight;
+                const rect = cm.scrollDOM.getBoundingClientRect();
                 return {
-                    viewportHeight: cm6.scrollDOM.clientHeight,
-                    lineHeight: cm6.defaultLineHeight,
+                    rowsFromTop: (coords.top - rect.top) / lineHeight,
+                    viewportRows,
+                    lineHeight,
+                    // The fork clamps an oversized margin to half the window.
+                    marginRows: Math.min(
+                        scrolloff,
+                        Math.max(0, (viewportRows - 1) / 2),
+                    ),
                 };
-            })) as { viewportHeight: number; lineHeight: number } | null;
-            expect(info).not.toBeNull();
+            })) as CursorLineGeometry | null;
+        }
+
+        it('zt should place cursor line near the top of viewport, not center (#143)', async function () {
+            await setupEditor(CONTENT_WITH_FM, { line: 118, ch: 0 });
+            await browser.pause(PAUSE.EDITOR_SETTLE);
 
             await vimKeys('z', 't');
             await browser.pause(100);
+            const geo = await cursorLineGeometry();
             const scrollAfterZt = await getScrollTop();
 
             await vimKeys('z', 'z');
             await browser.pause(100);
             const scrollAfterZz = await getScrollTop();
 
-            // zt and zz must produce meaningfully different positions.
-            // The difference should be roughly half the viewport height.
-            // If zt acts like zz (the reported bug), the difference will be tiny.
-            const diff = scrollAfterZt - scrollAfterZz;
-            expect(diff).toBeGreaterThan(info!.viewportHeight * 0.3);
+            expect(geo).not.toBeNull();
+            // `zz` centres the line and `zt` leaves the margin above it, so the
+            // gap is half the viewport less that margin. Derived from those two
+            // Vim statements rather than from the fork's pixel formula, which
+            // is why the tolerance is a whole two rows.
+            const gapRows = (scrollAfterZt - scrollAfterZz) / geo!.lineHeight;
+            const expectedGapRows = geo!.viewportRows / 2 - geo!.marginRows;
+            expect(Math.abs(gapRows - expectedGapRows)).toBeLessThanOrEqual(2);
         });
 
-        it('zt should place cursor line within top 15% of viewport (#143)', async function () {
+        it('zt should place cursor line at the scrolloff margin, not the centre (#143)', async function () {
             await setupEditor(CONTENT_WITH_FM, { line: 118, ch: 0 });
             await browser.pause(PAUSE.EDITOR_SETTLE);
 
             await vimKeys('z', 't');
             await browser.pause(100);
 
-            const result = (await browser.executeObsidian(
-                ({ app, obsidian }) => {
-                    const view = app.workspace.getActiveViewOfType(
-                        obsidian.MarkdownView,
-                    );
-                    if (!view) return null;
-                    const cm6 = (
-                        view.editor as unknown as Record<string, unknown>
-                    ).cm as
-                        | {
-                              scrollDOM: HTMLElement;
-                              coordsAtPos: (
-                                  pos: number,
-                              ) => { top: number; bottom: number } | null;
-                              state: {
-                                  doc: {
-                                      line: (n: number) => { from: number };
-                                  };
-                              };
-                          }
-                        | undefined;
-                    if (!cm6) return null;
-
-                    const scrollRect = cm6.scrollDOM.getBoundingClientRect();
-                    const cursorLine = view.editor.getCursor().line;
-                    const lineFrom = cm6.state.doc.line(cursorLine + 1).from;
-                    const coords = cm6.coordsAtPos(lineFrom);
-                    if (!coords) return null;
-
-                    return {
-                        offsetFromTop: coords.top - scrollRect.top,
-                        viewportHeight: scrollRect.height,
-                    };
-                },
-            )) as {
-                offsetFromTop: number;
-                viewportHeight: number;
-            } | null;
-
-            expect(result).not.toBeNull();
-            const relativePosition =
-                result!.offsetFromTop / result!.viewportHeight;
-            expect(relativePosition).toBeLessThan(0.15);
-            expect(relativePosition).toBeGreaterThanOrEqual(0);
+            const geo = await cursorLineGeometry();
+            expect(geo).not.toBeNull();
+            expect(geo!.rowsFromTop).toBeGreaterThanOrEqual(0);
+            expect(
+                Math.abs(geo!.rowsFromTop - geo!.marginRows),
+            ).toBeLessThanOrEqual(1);
         });
     });
 
@@ -449,10 +452,13 @@ describe('Normal mode — z-prefix commands (Tier 1)', function () {
                 geo!.viewportHeight,
             );
 
-            const rowsBelowCursor = Math.round(
-                (geo!.viewportHeight - geo!.cursorBottom) / geo!.lineHeight,
-            );
-            expect(rowsBelowCursor).toBe(0);
+            // Not Math.round(): a sub-pixel overshoot makes it return -0, and
+            // expect(-0).toBe(0) fails Object.is. CI hit exactly that while
+            // this machine measured a clean 0. `< 0.5` is the same row-0
+            // statement without the sign.
+            const rowsBelowCursor =
+                (geo!.viewportHeight - geo!.cursorBottom) / geo!.lineHeight;
+            expect(Math.abs(rowsBelowCursor)).toBeLessThan(0.5);
         });
 
         it('zz should still centre a short unwrapped line', async function () {
@@ -563,12 +569,16 @@ describe('Normal mode — z-prefix commands (Tier 1)', function () {
                     geo!.viewportHeight,
                 );
 
+                const viewportRowCount = geo!.viewportHeight / geo!.lineHeight;
                 const rowsAboveCursor = geo!.cursorTop / geo!.lineHeight;
                 const rowsBelowCursor =
                     (geo!.viewportHeight - geo!.cursorBottom) / geo!.lineHeight;
                 // Centred, not merely "off the bottom edge": both halves must
-                // match, and both must be far from the 0 the bug produced.
-                expect(rowsBelowCursor).toBeGreaterThan(20);
+                // match, and both must be far from the ~1 row the bug left.
+                // The floor is a fraction of the measured viewport rather than
+                // a constant — a constant calibrated here (20) failed CI,
+                // whose viewport is ~37 rows against this machine's ~54.
+                expect(rowsBelowCursor).toBeGreaterThan(viewportRowCount / 4);
                 expect(
                     Math.abs(rowsAboveCursor - rowsBelowCursor),
                 ).toBeLessThanOrEqual(1);
