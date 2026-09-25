@@ -2338,3 +2338,86 @@ extension-slot feature is exposed to the same teardown race, so this one cause
 may account for several macOS entries above. Test them against this lever
 before investigating them separately — `34168dd` may already have cleared
 some of them, which the next CI run will show.
+
+## The Windows Neovim install step: a parse bug, not a flaky install
+
+Not a test, but it fails the setup step of whole Windows shards, so it belongs
+here — and it is the case that best illustrates rule 1. The message refutes
+itself:
+
+```
+Neovim API level 14 log: "/tmp/nvim-debug.log" not accessible, logging to:
+"C:\\Users\\runneradmin\\AppData\\Local\\nvim-data\\nvim.log" is below
+required level 12
+```
+
+It names API level **14** and rejects it for being below **12**. The level was
+never the problem. The captured string was.
+
+### Root cause: stderr merged into the value
+
+The probe captured
+`… -c 'lua io.write(vim.version().api_level)' -c 'qa' 2>&1`. Headless Neovim
+writes **every** message to stderr: `msg_puts_printf` in `src/nvim/message.c`
+ends at `fprintf(stderr, …)` for everything except the `info_message` branch
+that `--version` and `--help` take. Any warning therefore lands inside the
+value that `^\d+$` then rejects.
+
+### Which warning, and why Windows only
+
+`.github/workflows/e2e.yml` sets `NVIM_LOG_FILE: /tmp/nvim-debug.log` at the
+top level, for every job. Windows Neovim cannot create that path, so
+`log_path_init` in `src/nvim/log.c` falls back to the state directory and
+exports `__NVIM_LOG_FILE_WANT`; on `VimEnter`,
+`runtime/lua/vim/_core/log.lua:check_log_file` turns that into
+`log: %q not accessible, logging to: %q`. Linux and macOS can write
+`/tmp/nvim-debug.log`, so neither ever produced it.
+
+### Why it looked intermittent
+
+`check_log_file` does not notify directly — it calls `vim.defer_fn(…, 100)`.
+The probe quits at `-c 'qa'`, normally long before that timer fires, so only a
+runner slow enough to still be alive at 100 ms sees the warning. That is the
+entire race. Nothing in the product is nondeterministic.
+
+### Forced failure
+
+Neovim 0.12.5 from the official release tarball, `NVIM_LOG_FILE` pointed at a
+directory so the fallback triggers, and the quit deferred past the timer:
+
+```
+$ … --clean --headless -u NONE -c 'lua io.write(vim.version().api_level)' \
+      -c 'lua vim.defer_fn(function() vim.cmd("qa") end, 400)'
+STDOUT=[14]
+STDERR=[log: "/tmp" not accessible, logging to: "…/nvim/nvim.log"]
+```
+
+Both capture forms against that command, in real `pwsh`:
+
+```
+OLD (2>&1)       : THROW -> Neovim API level 14
+log: "/tmp" not accessible, logging to: "…" is below required level 12
+NEW (stdout only): PASS  -> Neovim API level 14 satisfies required level 12
+```
+
+The fix is proven by the second line, per rule 4. An empty stdout — Neovim
+genuinely broken — still throws, so the floor check is not weakened.
+
+### Why not a retry
+
+The run that loses the 100 ms race fails deterministically, so a three-attempt
+loop turns one failure into three, and it would hide a real API-floor
+violation behind the same retry. The `EPERM` retry in the same workflow is a
+different thing: that one is a genuine NTFS file-locking collision a later
+attempt can win.
+
+### Still open: Windows RPC diagnostics are blind
+
+`NVIM_LOG_FILE: /tmp/nvim-debug.log` remains unusable on Windows, so Neovim
+logs to `%LOCALAPPDATA%\nvim-data\nvim.log` there and anything reading
+`$NVIM_LOG_FILE` finds nothing. `nvimLogPath()` in
+`rpc-structural-nav.e2e.ts` falls through to its two POSIX candidates and
+returns `undefined`, so it degrades to a size of 0 rather than failing — which
+is why this never surfaced as a red test. Any Windows entry above that was
+diagnosed with "the Neovim log was empty" was reading nothing. Fixing it means
+a per-OS path in the workflow; this change does not touch it.
