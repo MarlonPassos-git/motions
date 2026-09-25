@@ -569,6 +569,7 @@ Execute commands via the `:` command line, grouped by function.
 | `:outline`      |          | Jump to heading in current file              |
 | `:backlinks`    | `:backl` | Show files linking to current file           |
 | `:tags`         |          | Browse vault tags (opens sub-picker)         |
+| `:quickfix`     |          | Neovim quickfix list (RPC backend)           |
 | `:recent`       |          | Recently opened files                        |
 | `:marks`        |          | Jump to vim marks (grouped by buffer/global) |
 | `:grep {query}` | `:gre`   | Search vault content (pre-computed results)  |

@@ -25,7 +25,7 @@ Configure the three options under **Settings → Vim Motions → Vim engine**:
 
 ## Ownership
 
-While connected, Neovim owns editor input, text, mode, cursor, registers, undo and redo, folds, dot-repeat, macros, persistent extmarks, floating windows, structural motions, Markdown text objects, and hard-wrap operations. Native IME preedit stays in a cursor-positioned host input; only committed text is sent through `nvim_input`.
+While connected, Neovim owns editor input, text, mode, cursor, visual selection, registers, undo and redo, folds, dot-repeat, macros, persistent extmarks, floating windows, structural motions, Markdown text objects, and hard-wrap operations. Native IME preedit stays in a cursor-positioned host input; only committed text is sent through `nvim_input`.
 
 Neovim errors, warnings, notifications, echoes, Lua prints, and shell output appear as Obsidian Notices. Identical messages are limited to one Notice every five seconds. Routine undo, search-count, progress, completion, and command-list messages remain silent.
 
@@ -139,7 +139,9 @@ Neovim plugins run inside your own Neovim, so the question is never whether a pl
 Bridged:
 
 - Buffer text, cursor, modes, registers, marks, undo and redo, dot-repeat, and macros.
-- Persistent extmarks in every namespace — highlights and `overlay`, `eol`, and `inline` virtual text, carrying Neovim's own priorities and highlight groups.
+- Persistent extmarks in every namespace — highlights, `overlay`/`eol`/`inline` virtual text, `virt_lines` block text, `sign_text` in the sign gutter, and `line_hl_group` whole-line highlighting, carrying Neovim's own priorities and highlight groups. This is what diagnostic signs, diagnostic `virtual_lines`, code lens and gitsigns are expressed in.
+- The visual selection, in charwise, linewise and blockwise modes. It is rendered as a decoration rather than as Obsidian's own selection, because a real selection makes Obsidian consume the Escape keydown before the backend sees it.
+- Language servers: a client attaches on every note activation, and the mirrored document is closed and reopened as the note changes so its URI follows.
 - `nvim_buf_add_highlight()`, which creates an ordinary extmark and renders like any other.
 - Floating windows, including their buffer content, extmarks, border presence, and z-index. Placement is approximate.
 - Folds, treesitter, and LuaJIT FFI, all native to the Neovim you supply.
@@ -177,6 +179,8 @@ These bindings are provided in RPC mode, by Neovim companion mappings or by the 
 - Floating-window terminal cells are mapped onto proportional Markdown typography, so placement is approximate.
 - Ephemeral extmarks and legacy non-extmark highlights are not mirrored.
 - Fold persistence and the `i=` / `a=` highlight text object are unavailable in RPC mode.
+- Quickfix entries are browsable through **Picker: Quickfix list** (`:quickfix` / `:qf`); Neovim's own `:copen` window is not mirrored.
+- `number_hl_group` and `conceal` extmark fields are not mirrored; the first needs a line-number renderer the gutter does not expose, and the second would fight Obsidian's own Live Preview concealment.
 - Uppercase cross-file mark motions are deferred. Lowercase within-buffer marks remain native to Neovim.
 - Oil's embedded editor intentionally continues to use the bundled Vim engine.
 
