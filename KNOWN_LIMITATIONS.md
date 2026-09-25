@@ -144,6 +144,23 @@ An earlier host-side attempt violated both and turned `rpc-ime.e2e.ts` and `rpc-
 
 Two facts worth keeping for anyone touching this: the insert cursor is the **native caret, not a fat cursor** — `measureCursor()` computes `showCursor = !insertMode || overwrite || shape !== 'bar'`, so a bar shape draws no element and `caret-color` is set instead, and a test must assert the absence of `.cm-fat-cursor` plus a non-transparent caret. And an external mode change produces no `ViewUpdate` of its own, so the fork keeps a registry of live `BlockCursorPlugin` instances to refresh; `update()` alone never sees it.
 
+### Only the active Markdown editor is mirrored
+
+One Neovim buffer is created in `NeovimDocumentSync.start()` and renamed and reseeded on every `active-leaf-change`. A split pane therefore shows Obsidian's own rendering of a note that Neovim is not tracking: keys go to whichever leaf is active, and the inactive pane is an ordinary input-inert CM6 editor.
+
+This is deferred rather than pending, because it is an architectural change rather than a fix. The coupling, measured:
+
+| Site                                                             | Assumption                                                                                                                                                            |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/rpc/document-sync.ts`                                       | 15 references to a single `this.buffer` and 10 to a single `this.editorView`                                                                                          |
+| `src/rpc/companion.lua`                                          | 23 references to one `mirror_buf` — every structural motion, text object, fold alias, the `BufWriteCmd`/`BufReadCmd` pair and the decoration provider are bound to it |
+| `src/rpc/key-delegation.ts`                                      | `nvim_win_get_cursor(0)` and `nvim_win_set_cursor(0)` throughout, so "the window" is implicit                                                                         |
+| `cmdline`, `popupmenu`, `decorations`, `obsidian-feature-bridge` | each resolves the one active `MarkdownView` to position or apply against                                                                                              |
+
+A real implementation needs a buffer-per-leaf map with line events routed by buffer handle, the companion rebound per buffer rather than captured over one, and Neovim windows corresponding to Obsidian's splits so window-relative calls mean something. Pane focus would have to drive `nvim_set_current_win` rather than a rename, which also removes the per-activation reseed and the `didClose`/`didOpen` churn it forces on a language server.
+
+Until then the single-buffer invariant is what keeps the mirror safe: `rpc-text-sync.e2e.ts` asserts that Neovim's previous mirror is never written into another note, which is the failure mode a partial multi-leaf implementation would reintroduce.
+
 ### ~~`vim.lsp.enable()` attaches to the mirror buffer only on the first activation~~ (Fixed)
 
 A native LSP workflow already crosses the bridge without new bridge code, and `test/specs/rpc-lsp-capability.e2e.ts` measures it against an in-process server: server-provided completion items render in the external popup menu, `vim.lsp.buf.hover()` renders as a float, and diagnostic `virtual_text` and `underline` render as CM6 decorations carrying Neovim's own highlight groups. The mirror buffer is named with the note's absolute vault path, so a server's root resolution has a real path to work from.
